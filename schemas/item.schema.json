@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/item.schema.json",
+  "title": "eval_item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "dataset_spec_version",
+    "domain_tags",
+    "difficulty",
+    "task_type",
+    "prompt",
+    "input",
+    "input_schema",
+    "output_schema",
+    "constraints",
+    "provenance"
+  ],
+  "properties": {
+    "item_id": { "type": "string", "pattern": "^[a-z0-9_\\-]{8,64}$" },
+    "dataset_spec_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+
+    "domain_tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 1,
+      "maxItems": 8
+    },
+
+    "difficulty": { "type": "string", "enum": ["easy", "medium", "hard", "expert"] },
+    "task_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+
+    "prompt": { "type": "string", "minLength": 1, "maxLength": 20000 },
+
+    "input": { "type": "object" },
+    "input_schema": { "type": "object" },
+    "output_schema": { "type": "object" },
+
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["no_subjective_judgement", "safety_notes", "locked_fields"],
+      "properties": {
+        "no_subjective_judgement": { "type": "boolean", "const": true },
+        "safety_notes": { "type": "string", "minLength": 0, "maxLength": 2000 },
+        "locked_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      }
+    },
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_at", "created_by", "source"],
+      "properties": {
+        "created_at": { "type": "string", "format": "date-time" },
+        "created_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "source": { "type": "string", "enum": ["synthetic", "prod_log", "human_curated"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,201 @@
+"""
+Diagnoser: cluster failures and emit operational action plans with root-cause hypotheses,
+recommended owners, blast radius, top examples, and next actions.
+
+Heuristics (recommended_owner):
+  TOOL_ARGS_* → tooling (or data)
+  TOOL_BINDING_* → model (or data)
+  EXACT_MATCH_FAILED → model
+  UNKNOWN_CHECKER / UNSUPPORTED_EVAL_METHOD → eval
+  SCHEMA / NOT_JSON → product
+  Other TRAJECTORY + code → data
+  Future: high QA rejection rate in one slice → data / dataset spec (needs QA stats input).
+"""
+from collections import defaultdict
+from typing import Any, Dict, List, Tuple
+
+# Evidence code prefixes / values for heuristic routing
+TOOL_ARGS_PREFIX = "TOOL_ARGS_"
+TOOL_BINDING_PREFIX = "TOOL_BINDING_"
+EXACT_MATCH_FAILED = "EXACT_MATCH_FAILED"
+UNKNOWN_CHECKER = "UNKNOWN_CHECKER"
+UNSUPPORTED_EVAL_METHOD = "UNSUPPORTED_EVAL_METHOD"
+
+
+def _evidence_code(record: Dict[str, Any]) -> str:
+    """First evidence entry with a code, or empty string."""
+    for e in record.get("evidence", []) or []:
+        if e.get("code"):
+            return e["code"]
+    return ""
+
+
+def _cluster_key(record: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    """Cluster by (error_type, evidence.code, task_type, eval_method)."""
+    error_type = record.get("error_type") or "PASS"
+    code = _evidence_code(record)
+    task_type = record.get("task_type") or ""
+    eval_method = record.get("eval_method") or ""
+    return (error_type, code, task_type, eval_method)
+
+
+def _blast_radius_tier(count: int, total: int) -> str:
+    """Classify blast radius from cluster count and total evaluated."""
+    if total <= 0:
+        return "unknown"
+    pct = count / total
+    if pct >= 0.3 or count >= 10:
+        return "high"
+    if pct >= 0.1 or count >= 3:
+        return "medium"
+    return "low"
+
+
+def _root_cause_and_owner(
+    error_type: str,
+    code: str,
+    count: int,
+    total: int,
+) -> Tuple[str, str, str]:
+    """
+    Heuristics: return (root_cause_hypothesis, recommended_owner, next_action).
+    recommended_owner one of: data, model, tooling, product, eval.
+    """
+    # Eval infra: wrong checker or unsupported method
+    if code == UNKNOWN_CHECKER or code == UNSUPPORTED_EVAL_METHOD:
+        return (
+            "Eval configuration or registry mismatch; checker_name or eval_method not supported.",
+            "eval",
+            "Fix oracle checker_name / eval_method or add the checker to the registry; re-run suite.",
+        )
+
+    # Schema / JSON validity → product
+    if "SCHEMA" in error_type or "NOT_JSON" in error_type:
+        return (
+            "Model output fails schema or is not valid JSON; formatting or instruction adherence issue.",
+            "product",
+            "Improve output formatting instructions; add stricter JSON schema and examples; add schema_check-heavy items.",
+        )
+
+    # Tool args (arg_schema failures) → data or tooling
+    if code.startswith(TOOL_ARGS_PREFIX):
+        return (
+            "Tool-call arguments fail schema (e.g. query format, length); model or tool contract mismatch.",
+            "tooling",
+            "Align tool arg_schema with actual usage; add data/examples for correct query formulation; consider data if many variants fail.",
+        )
+
+    # Tool binding (result not reflected in output) → model or data
+    if code.startswith(TOOL_BINDING_PREFIX):
+        return (
+            "Tool result not correctly reflected in final answer; grounding or copy/transform failure.",
+            "model",
+            "Add trajectory data where output must copy/transform tool result; tune for tool-use grounding; track binding mismatch rate.",
+        )
+
+    # Exact-match with high consistency (most failures in cluster) → model
+    if EXACT_MATCH_FAILED in error_type:
+        return (
+            "Deterministic exact-match failures; model output differs from expected (format or value).",
+            "model",
+            "Add SFT data for deterministic transforms; ensure canonical label/format handling; add exact_match items with varied surface forms.",
+        )
+
+    # Other trajectory (sequence, max_calls, etc.) → data
+    if "TRAJECTORY" in error_type and code:
+        return (
+            "Tool-use sequence or usage constraints violated; wrong tools or order.",
+            "data",
+            "Add trajectory data for this failure code; train agent to call required tools in order; add targeted trajectory items.",
+        )
+
+    # Programmatic / rubric / generic
+    if "RUBRIC" in error_type:
+        return (
+            "Rubric or judge-based check failed; subjective or criteria mismatch.",
+            "model",
+            "Review rubric criteria and model outputs; add calibration data or adjust evidence_requirements.",
+        )
+    if "PROGRAMMATIC" in error_type:
+        return (
+            "Programmatic checker failed; logic or format mismatch.",
+            "model",
+            "Review checker logic and model output distribution; add targeted items or adjust checker.",
+        )
+
+    # Default: eval / infra
+    return (
+        "Unclassified failure cluster; review oracle and eval_method routing.",
+        "eval",
+        "Review oracle + eval_method; ensure deterministic method when possible; add targeted items for this failure type.",
+    )
+
+
+def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Cluster failures by (error_type, evidence_code, task_type, eval_method) and emit
+    operational action plans: cluster_id, root_cause_hypothesis, recommended_owner,
+    priority, estimated_blast_radius, top_examples, next_action.
+    """
+    clusters = defaultdict(list)
+    for r in eval_results:
+        key = _cluster_key(r)
+        clusters[key].append(r)
+
+    total_evaluated = len(eval_results)
+    plans: List[Dict[str, Any]] = []
+
+    failure_items = sorted(
+        [(k, v) for k, v in clusters.items() if (k[0] or "PASS") != "PASS"],
+        key=lambda kv: len(kv[1]),
+        reverse=True,
+    )
+    for (error_type, code, task_type, eval_method), group in failure_items[:10]:
+        count = len(group)
+        cluster_id = error_type
+        if code:
+            cluster_id = f"{error_type}/{code}"
+        if task_type or eval_method:
+            cluster_id = f"{cluster_id}|{task_type}|{eval_method}"
+
+        root_cause, recommended_owner, next_action = _root_cause_and_owner(
+            error_type, code, count, total_evaluated
+        )
+        blast_tier = _blast_radius_tier(count, total_evaluated)
+        estimated_blast_radius = f"{blast_tier} ({count} items in run)"
+        top_examples = [
+            {
+                "item_id": x["item_id"],
+                "error_type": x.get("error_type", ""),
+                "evidence_code": _evidence_code(x),
+            }
+            for x in group[:5]
+        ]
+        priority = 1 if blast_tier == "high" else (2 if blast_tier == "medium" else 3)
+
+        plans.append({
+            "cluster_id": cluster_id,
+            "summary": f"Cluster '{cluster_id}' with {count} failures (sample item_ids: {[e['item_id'] for e in top_examples]})",
+            "root_cause_hypothesis": root_cause,
+            "recommended_owner": recommended_owner,
+            "priority": priority,
+            "estimated_blast_radius": estimated_blast_radius,
+            "top_examples": top_examples,
+            "next_action": next_action,
+            "count": count,
+        })
+
+    if not plans:
+        plans.append({
+            "cluster_id": "PASS",
+            "summary": "All items passed in this run; expand coverage and difficulty gradually.",
+            "root_cause_hypothesis": "No failures in this run.",
+            "recommended_owner": "eval",
+            "priority": 4,
+            "estimated_blast_radius": "none",
+            "top_examples": [],
+            "next_action": "Add harder targets, more domains, and trajectory_check tasks; run larger batch and track metrics.",
+            "count": 0,
+        })
+
+    return plans

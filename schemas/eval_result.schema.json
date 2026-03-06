@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/eval_result.schema.json",
+  "title": "eval_result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "verdict",
+    "score",
+    "error_type",
+    "evidence",
+    "raw_output_ref",
+    "model_version",
+    "seed",
+    "created_at"
+  ],
+  "properties": {
+    "item_id": { "type": "string" },
+    "verdict": { "type": "string", "enum": ["pass", "fail"] },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "error_type": { "type": "string", "minLength": 0, "maxLength": 128 },
+    "evidence": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "message": { "type": "string", "minLength": 0, "maxLength": 4000 },
+          "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "dimension": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "tool_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "expected": {},
+          "observed": {},
+          "locator": {},
+          "artifact_ref": {}
+        }
+      }
+    },
+    "raw_output_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "uri", "mime", "bytes"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "uri": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "mime": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 20000000 }
+      }
+    },
+    "model_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "task_type": { "type": "string", "minLength": 0, "maxLength": 128 },
+    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 }
+  }
+}

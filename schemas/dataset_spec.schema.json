@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/dataset_spec.schema.json",
+  "title": "dataset_spec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataset_name",
+    "dataset_spec_version",
+    "allowed_domain_tags",
+    "capability_targets",
+    "defaults"
+  ],
+  "properties": {
+    "dataset_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "dataset_spec_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+
+    "allowed_domain_tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 1,
+      "maxItems": 200
+    },
+
+    "capability_targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_id", "domain_tags", "difficulty", "task_type", "quota_weight"],
+        "properties": {
+          "target_id": { "type": "string", "pattern": "^[a-z0-9_\\-]{3,64}$" },
+          "domain_tags": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "difficulty": { "type": "string", "enum": ["easy", "medium", "hard", "expert"] },
+          "task_type": {
+            "type": "string",
+            "enum": [
+              "json_math_add",
+              "json_extract_email",
+              "json_classify_sentiment",
+              "trajectory_email_then_answer",
+              "json_extract_structured",
+              "json_classify_canonical"
+            ]
+          },
+          "quota_weight": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "min_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "max_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "risk_tier": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "split": { "type": "string", "enum": ["regression", "exploration", "stress"] },
+          "dedup_group": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_prompt_length", "max_retries_per_stage", "seed"],
+      "properties": {
+        "max_prompt_length": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "max_retries_per_stage": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    }
+  }
+}

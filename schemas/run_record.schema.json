@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/run_record.schema.json",
+  "title": "run_record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "dataset_name",
+    "dataset_spec_version",
+    "model_version",
+    "tool_snapshot_hash",
+    "seed",
+    "started_at",
+    "ended_at",
+    "paths",
+    "metrics"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "dataset_name": { "type": "string" },
+    "dataset_spec_version": { "type": "string" },
+    "model_version": { "type": "string" },
+    "model_versions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 0
+    },
+    "tool_snapshot_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "seed": { "type": "integer" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_dir", "events_jsonl", "artifacts_dir"],
+      "properties": {
+        "run_dir": { "type": "string" },
+        "events_jsonl": { "type": "string" },
+        "artifacts_dir": { "type": "string" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items_total", "qa_passed", "eval_passed", "failures_total"],
+      "properties": {
+        "items_total": { "type": "integer", "minimum": 0 },
+        "qa_passed": { "type": "integer", "minimum": 0 },
+        "eval_passed": { "type": "integer", "minimum": 0 },
+        "failures_total": { "type": "integer", "minimum": 0 },
+        "attempted_total": { "type": "integer", "minimum": 0 },
+        "qa_failed_total": { "type": "integer", "minimum": 0 },
+        "item_abort_total": { "type": "integer", "minimum": 0 },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "latency_ms_p50": { "type": ["integer", "null"] },
+        "latency_ms_p90": { "type": ["integer", "null"] }
+      }
+    }
+  }
+}

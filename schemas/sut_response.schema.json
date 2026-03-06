@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sut_response.schema.json",
+  "title": "sut_response",
+  "description": "HTTP SUT envelope (200 response body)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model_version", "output"],
+  "properties": {
+    "model_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "output": {},
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "tool_trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "args": { "type": ["object", "null"] },
+          "result": { "type": ["object", "null"] },
+          "timestamp": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    }
+  }
+}

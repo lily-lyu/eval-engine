@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/data_card.schema.json",
+  "title": "data_card",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataset_name",
+    "dataset_spec_version",
+    "motivation",
+    "intended_use",
+    "composition",
+    "limitations",
+    "version_history"
+  ],
+  "properties": {
+    "dataset_name": { "type": "string" },
+    "dataset_spec_version": { "type": "string" },
+    "motivation": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "intended_use": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "composition": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "limitations": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "version_history": { "type": "string", "minLength": 1, "maxLength": 8000 }
+  }
+}
