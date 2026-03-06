@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 runs/
 .DS_Store
+
+ci_artifacts/
+RUN_ID
+*_raw.txt
+*.log
+=4.19.0
