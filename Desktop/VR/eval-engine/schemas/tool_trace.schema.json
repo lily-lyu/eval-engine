@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/tool_trace.schema.json",
+  "title": "tool_trace",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["name"],
+    "properties": {
+      "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "args": { "type": ["object", "null"] },
+      "result": { "type": ["object", "null"] },
+      "timestamp": { "type": ["string", "null"], "format": "date-time" }
+    }
+  }
+}

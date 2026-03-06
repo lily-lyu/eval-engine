@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/action_plan.schema.json",
+  "title": "action_plan",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "cluster_id",
+    "summary",
+    "root_cause_hypothesis",
+    "recommended_owner",
+    "priority",
+    "estimated_blast_radius",
+    "top_examples",
+    "next_action"
+  ],
+  "properties": {
+    "cluster_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "root_cause_hypothesis": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "recommended_owner": {
+      "type": "string",
+      "enum": ["data", "model", "tooling", "product", "eval"]
+    },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "estimated_blast_radius": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "top_examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item_id"],
+        "properties": {
+          "item_id": { "type": "string" },
+          "error_type": { "type": "string" },
+          "evidence_code": { "type": "string" }
+        }
+      },
+      "maxItems": 20
+    },
+    "next_action": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "count": { "type": "integer", "minimum": 0 }
+  }
+}

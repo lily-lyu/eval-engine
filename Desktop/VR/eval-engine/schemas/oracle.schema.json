@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/oracle.schema.json",
+  "title": "oracle_record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "eval_method",
+    "expected",
+    "method_justification",
+    "evidence_requirements",
+    "leak_check",
+    "created_at"
+  ],
+  "properties": {
+    "item_id": { "type": "string", "pattern": "^[a-z0-9_\\-]{8,64}$" },
+
+    "eval_method": {
+      "type": "string",
+      "enum": [
+        "programmatic_check",
+        "schema_check",
+        "exact_match",
+        "unit_test",
+        "trajectory_check",
+        "rubric_judge"
+      ]
+    },
+
+    "expected": {},
+
+    "method_justification": { "type": "string", "minLength": 1, "maxLength": 4000 },
+
+    "evidence_requirements": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+
+    "leak_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "notes"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "notes": { "type": "string", "minLength": 0, "maxLength": 2000 }
+      }
+    },
+
+    "created_at": { "type": "string", "format": "date-time" },
+
+    "checker_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "checker_config": { "type": "object", "additionalProperties": true },
+    "failure_taxonomy": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "canonicalization_rules": { "type": "array", "items": {} }
+  }
+}
