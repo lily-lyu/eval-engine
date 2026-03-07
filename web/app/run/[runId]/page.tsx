@@ -14,12 +14,89 @@ import {
   type RunSummaryRow,
 } from "@/lib/run-view";
 
-type RunSummary = RunSummaryRow & {
+/** Raw run summary from API (run_summary.json or run_record.json); may lack RunSummaryRow fields. */
+type RunSummaryRaw = Record<string, unknown> & {
+  run_id?: string;
+  run_dir?: string;
+  dataset_name?: string;
+  dataset_spec_version?: string;
+  model_version?: string;
   model_versions?: string[];
+  started_at?: string | null;
+  ended_at?: string | null;
+  counts?: { items_total?: number; eval_passed?: number; eval_failed?: number; qa_passed_evaluated?: number };
+  metrics?: { items_total?: number; eval_passed?: number; failures_total?: number };
   artifacts_dir?: string;
   tool_snapshot_hash?: string;
   seed?: number;
 };
+
+/** Normalize API response + events/results into RunSummaryRow and detect blocked-before-execution. */
+function normalizeRunSummary(
+  runId: string,
+  summaryRaw: RunSummaryRaw,
+  events: EventRow[],
+  results: ResultRow[],
+): { summary: RunSummaryRow; blockedPreExecution: boolean } {
+  const counts = summaryRaw.counts ?? {};
+  const metrics = summaryRaw.metrics ?? {};
+  let items_total =
+    (typeof summaryRaw.items_total === "number" ? summaryRaw.items_total : undefined) ??
+    counts.items_total ??
+    metrics.items_total ??
+    0;
+  let eval_passed =
+    (typeof summaryRaw.eval_passed === "number" ? summaryRaw.eval_passed : undefined) ??
+    counts.eval_passed ??
+    metrics.eval_passed ??
+    0;
+  let failures_total =
+    (typeof summaryRaw.failures_total === "number" ? summaryRaw.failures_total : undefined) ??
+    metrics.failures_total ??
+    counts.eval_failed ??
+    0;
+
+  if (results.length > 0) {
+    items_total = results.length;
+    eval_passed = results.filter((r) => r.verdict === "pass").length;
+    failures_total = items_total - eval_passed;
+  } else if (events.length > 0) {
+    const generateStarts = events.filter((e) => e.stage === "GENERATE_ITEM" && e.status === "start").length;
+    const qaFails = events.filter((e) => e.stage === "QA_GATE" && e.status === "fail").length;
+    const runModelStarts = events.filter((e) => e.stage === "RUN_MODEL" && e.status === "start").length;
+    if (items_total === 0 && generateStarts > 0) {
+      items_total = generateStarts;
+      eval_passed = 0;
+      failures_total = qaFails > 0 ? qaFails : runModelStarts === 0 ? items_total : 0;
+    }
+  }
+
+  const pass_rate = items_total > 0 ? eval_passed / items_total : 0;
+
+  const hasQaFail = events.some((e) => e.stage === "QA_GATE" && e.status === "fail");
+  const hasRunModel = events.some((e) => e.stage === "RUN_MODEL");
+  const hasVerify = events.some((e) => e.stage === "VERIFY");
+  const blockedPreExecution = hasQaFail && !hasRunModel && !hasVerify;
+
+  const sortedTs = events.map((e) => e.ts).filter(Boolean).sort();
+  const started_at = summaryRaw.started_at ?? (sortedTs[0] ?? null);
+  const ended_at = summaryRaw.ended_at ?? (sortedTs[sortedTs.length - 1] ?? null);
+
+  const summary: RunSummaryRow = {
+    run_id: runId,
+    run_dir: String(summaryRaw.run_dir ?? ""),
+    dataset_name: String(summaryRaw.dataset_name ?? ""),
+    dataset_spec_version: String(summaryRaw.dataset_spec_version ?? ""),
+    model_version: String(summaryRaw.model_version ?? (summaryRaw.model_versions as string[])?.[0] ?? ""),
+    started_at: started_at ?? null,
+    ended_at: ended_at ?? null,
+    items_total,
+    eval_passed,
+    failures_total,
+    pass_rate,
+  };
+  return { summary, blockedPreExecution };
+}
 
 type EventsResponse = {
   content: {
@@ -69,8 +146,8 @@ export default async function RunDetailPage({
     ? ((sp.tab as Tab) ?? "overview")
     : "overview";
 
-  const [summary, eventsRes, resultsRes, clustersRes, runsRes] = await Promise.all([
-    apiGet(`/runs/${runId}`) as Promise<RunSummary>,
+  const [summaryRaw, eventsRes, resultsRes, clustersRes, runsRes] = await Promise.all([
+    apiGet(`/runs/${runId}`) as Promise<RunSummaryRaw>,
     apiGet(`/runs/${runId}/events?limit=500`) as Promise<EventsResponse>,
     apiGet(`/runs/${runId}/results?limit=500`) as Promise<ResultsResponse>,
     apiGet(`/runs/${runId}/clusters`) as Promise<ClustersResponse>,
@@ -80,12 +157,21 @@ export default async function RunDetailPage({
   const events = eventsRes.content?.events ?? [];
   const results = resultsRes.content?.results ?? [];
   const clusters = clustersRes.content?.clusters ?? [];
+  const { summary: normalizedCurrentRun, blockedPreExecution } = normalizeRunSummary(
+    runId,
+    summaryRaw ?? {},
+    events,
+    results,
+  );
   const stageRows = buildStageRows(events, results);
-  const status = getRunStatus(summary);
+  const status = getRunStatus(normalizedCurrentRun, blockedPreExecution);
 
   const previousComparableRun =
     runsRes.runs.find(
-      (r) => r.run_id !== runId && r.dataset_name === summary.dataset_name && r.model_version === summary.model_version,
+      (r) =>
+        r.run_id !== runId &&
+        r.dataset_name === normalizedCurrentRun.dataset_name &&
+        r.model_version === normalizedCurrentRun.model_version,
     ) ?? null;
 
   let previousClusters: ClusterRow[] = [];
@@ -101,7 +187,7 @@ export default async function RunDetailPage({
   }
 
   const release = buildReleaseDecision({
-    current: summary,
+    current: normalizedCurrentRun,
     currentClusters: clusters,
     previous: previousComparableRun,
     previousClusters,
@@ -119,7 +205,7 @@ export default async function RunDetailPage({
               Mission Control
             </h1>
             <div className="mt-2 text-sm text-neutral-400">
-              {summary.dataset_name} · {summary.model_version}
+              {normalizedCurrentRun.dataset_name || "—"} · {normalizedCurrentRun.model_version || "—"}
             </div>
             <div className="mt-1 font-mono text-xs text-neutral-500">{runId}</div>
           </div>
@@ -127,9 +213,9 @@ export default async function RunDetailPage({
         </div>
 
         <div className="mb-8 grid gap-4 md:grid-cols-4">
-          <StatCard label="Pass rate" value={formatPassRate(summary.pass_rate)} />
-          <StatCard label="Failures" value={String(summary.failures_total)} />
-          <StatCard label="Items" value={String(summary.items_total)} />
+          <StatCard label="Pass rate" value={formatPassRate(normalizedCurrentRun.pass_rate)} />
+          <StatCard label="Failures" value={String(normalizedCurrentRun.failures_total)} />
+          <StatCard label="Items" value={String(normalizedCurrentRun.items_total)} />
           <StatCard
             label="Release gate"
             value={release.gate}
@@ -208,7 +294,7 @@ export default async function RunDetailPage({
                       Model versions
                     </div>
                     <div className="mt-2 text-sm text-neutral-200">
-                      {(summary.model_versions ?? [summary.model_version]).join(", ")}
+                      {(summaryRaw.model_versions ?? [normalizedCurrentRun.model_version]).join(", ")}
                     </div>
                   </div>
 
@@ -217,7 +303,7 @@ export default async function RunDetailPage({
                       Tool snapshot hash
                     </div>
                     <div className="mt-2 font-mono text-xs text-neutral-300">
-                      {summary.tool_snapshot_hash ?? "—"}
+                      {summaryRaw.tool_snapshot_hash ?? "—"}
                     </div>
                   </div>
 
@@ -225,7 +311,9 @@ export default async function RunDetailPage({
                     <div className="text-xs uppercase tracking-[0.16em] text-neutral-500">
                       Seed
                     </div>
-                    <div className="mt-2 text-sm text-neutral-200">{String(summary.seed ?? "—")}</div>
+                    <div className="mt-2 text-sm text-neutral-200">
+                      {String(summaryRaw.seed ?? "—")}
+                    </div>
                   </div>
                 </div>
               </SectionCard>

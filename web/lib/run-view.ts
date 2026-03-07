@@ -48,7 +48,13 @@ export function formatPassRate(value: number | null | undefined) {
   return `${(value * 100).toFixed(value === 1 || value === 0 ? 0 : 1)}%`;
 }
 
-export function getRunStatus(run: Pick<RunSummaryRow, "failures_total" | "items_total" | "eval_passed">): "PASS" | "FAIL" | "PARTIAL" {
+export type RunStatus = "PASS" | "FAIL" | "PARTIAL" | "WATCH" | "BLOCKED";
+
+export function getRunStatus(
+  run: Pick<RunSummaryRow, "failures_total" | "items_total" | "eval_passed">,
+  blockedPreExecution?: boolean,
+): RunStatus {
+  if (blockedPreExecution) return "BLOCKED";
   if (run.failures_total === 0 && run.items_total > 0) return "PASS";
   if (run.eval_passed === 0 && run.failures_total > 0) return "FAIL";
   return "PARTIAL";
@@ -143,41 +149,35 @@ export function buildStageRows(events: EventRow[], results: ResultRow[]): StageR
     return at - bt;
   });
 
-  const startMap = new Map<string, number>();
+  const startTimestampsByStage = new Map<string, number[]>();
   const durationMap = new Map<string, number[]>();
-  const inputMap = new Map<string, Set<string>>();
   const okMap = new Map<string, number>();
   const failMap = new Map<string, number>();
   const failureCodesMap = new Map<string, string[]>();
 
   for (const event of sorted) {
-    const identity = event.item_id || "__run__";
-    const key = `${event.stage}:${identity}`;
     const t = safeTs(event.ts);
 
-    if (!inputMap.has(event.stage)) inputMap.set(event.stage, new Set());
-    inputMap.get(event.stage)!.add(identity);
-
     if (event.status === "start" && t != null) {
-      startMap.set(key, t);
+      if (!startTimestampsByStage.has(event.stage)) startTimestampsByStage.set(event.stage, []);
+      startTimestampsByStage.get(event.stage)!.push(t);
     }
 
-    if ((event.status === "ok" || event.status === "fail") && t != null && startMap.has(key)) {
-      const started = startMap.get(key)!;
-      const duration = t - started;
-      if (!durationMap.has(event.stage)) durationMap.set(event.stage, []);
-      durationMap.get(event.stage)!.push(duration);
-      startMap.delete(key);
-    }
-
-    if (event.status === "ok") {
-      okMap.set(event.stage, (okMap.get(event.stage) ?? 0) + 1);
-    }
-
-    if (event.status === "fail") {
-      failMap.set(event.stage, (failMap.get(event.stage) ?? 0) + 1);
-      if (!failureCodesMap.has(event.stage)) failureCodesMap.set(event.stage, []);
-      if (event.failure_code) failureCodesMap.get(event.stage)!.push(event.failure_code);
+    if (event.status === "ok" || event.status === "fail") {
+      const starts = startTimestampsByStage.get(event.stage);
+      if (t != null && starts && starts.length > 0) {
+        const started = starts.shift()!;
+        const duration = t - started;
+        if (!durationMap.has(event.stage)) durationMap.set(event.stage, []);
+        durationMap.get(event.stage)!.push(duration);
+      }
+      if (event.status === "ok") {
+        okMap.set(event.stage, (okMap.get(event.stage) ?? 0) + 1);
+      } else {
+        failMap.set(event.stage, (failMap.get(event.stage) ?? 0) + 1);
+        if (!failureCodesMap.has(event.stage)) failureCodesMap.set(event.stage, []);
+        if (event.failure_code) failureCodesMap.get(event.stage)!.push(event.failure_code);
+      }
     }
   }
 
@@ -192,14 +192,13 @@ export function buildStageRows(events: EventRow[], results: ResultRow[]): StageR
       mostCommon(failureCodesMap.get(stage) ?? []) ??
       (stage === "VERIFY" ? mostCommon(results.map((r) => r.error_type).filter(Boolean)) : null);
 
+    const inputCount = events.filter((e) => e.stage === stage && e.status === "start").length;
+
     return {
       agent,
       stage,
       label,
-      inputCount:
-        stage === "DIAGNOSE" || stage === "DATA_REQUESTS" || stage === "PACKAGE"
-          ? Math.max(results.length, 1)
-          : (inputMap.get(stage)?.size ?? 0),
+      inputCount,
       okCount: okMap.get(stage) ?? 0,
       failCount: failMap.get(stage) ?? 0,
       avgLatencyMs,

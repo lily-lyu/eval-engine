@@ -383,18 +383,24 @@ def run_batch(
     )
 
     # Data production backlog (A6 consumes clusters, not raw eval_results)
-    data_requests = produce_data_requests(clusters, eval_results)
-    data_requests_ref = save_artifact_json(artifacts_dir, "batch_a6_data_requests.json", data_requests)
-    emit_handoff(
-        run_dir=run_dir,
-        run_id=run_id,
-        item_id="",
-        agent_id="A6",
-        stage="PRODUCE_DATA_REQUESTS",
-        status="ok",
-        output_ref=data_requests_ref,
-        version_bundle=version_bundle,
-    )
+    append_jsonl(events_path, [_event(run_id, "DATA_REQUESTS", "start", message="produce_data_requests")])
+    try:
+        data_requests = produce_data_requests(clusters, eval_results)
+        data_requests_ref = save_artifact_json(artifacts_dir, "batch_a6_data_requests.json", data_requests)
+        append_jsonl(events_path, [_event(run_id, "DATA_REQUESTS", "ok", message=f"data_requests={len(data_requests)}")])
+        emit_handoff(
+            run_dir=run_dir,
+            run_id=run_id,
+            item_id="",
+            agent_id="A6",
+            stage="DATA_REQUESTS",
+            status="ok",
+            output_ref=data_requests_ref,
+            version_bundle=version_bundle,
+        )
+    except Exception as e:
+        append_jsonl(events_path, [_event(run_id, "DATA_REQUESTS", "fail", failure_code="DATA_REQUESTS_ERROR", message=str(e))])
+        raise
 
     # PACKAGE
     release_manifest = [

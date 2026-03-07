@@ -134,7 +134,12 @@ def _run_schema_gate(item: Dict[str, Any], oracle: Dict[str, Any]) -> Dict[str, 
         validate_or_raise("oracle.schema.json", oracle)
         return _gate_result("schema", True)
     except Exception as e:
-        return _gate_result("schema", False, SCHEMA_INVALID, str(e))
+        err_msg = str(e)
+        if "validation failed:" in err_msg:
+            explanation = f"Schema validation failed (schema file and ref path in message). {err_msg}"
+        else:
+            explanation = f"Schema or $ref resolution failed: {err_msg}"
+        return _gate_result("schema", False, SCHEMA_INVALID, explanation)
 
 
 def _run_semantic_gate(

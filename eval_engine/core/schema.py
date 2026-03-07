@@ -30,15 +30,22 @@ def get_validator(schema_filename: str) -> Draft202012Validator:
     if schema_filename in _VALIDATOR_CACHE:
         return _VALIDATOR_CACHE[schema_filename]
     schema = load_schema(schema_filename)
-    resolver = RefResolver(base_uri=_SCHEMAS_BASE_URI, referrer=schema)
-    v = Draft202012Validator(schema, resolver=resolver)
+    schema_copy = {**schema, "$id": _SCHEMAS_BASE_URI + schema_filename}
+    resolver = RefResolver(base_uri=_SCHEMAS_BASE_URI, referrer=schema_copy)
+    v = Draft202012Validator(schema_copy, resolver=resolver)
     _VALIDATOR_CACHE[schema_filename] = v
     return v
 
 
 def validate_or_raise(schema_filename: str, instance: Any) -> None:
     v = get_validator(schema_filename)
-    errors = sorted(v.iter_errors(instance), key=lambda e: e.path)
+    errors = sorted(v.iter_errors(instance), key=lambda e: (list(e.absolute_path), e.message))
     if errors:
-        msg = "; ".join([f"{list(e.path)}: {e.message}" for e in errors[:5]])
+        parts = []
+        for e in errors[:5]:
+            path_str = "".join(f"[{repr(p)}]" for p in e.absolute_path)
+            schema_ref = getattr(e, "schema_path", None) or getattr(e, "ref", None)
+            ref_str = f" ref={schema_ref}" if schema_ref else ""
+            parts.append(f"{path_str}: {e.message}{ref_str}")
+        msg = "; ".join(parts)
         raise ValueError(f"[{schema_filename}] validation failed: {msg}")
