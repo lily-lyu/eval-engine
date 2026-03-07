@@ -108,7 +108,7 @@ def run(payload: RunPayload, demo_case: str | None = Query(default=None)):
     # Normal stub behavior
     output = _run_registry_mock(task_type, payload.input)
     output, tool_trace = _apply_trajectory_test_mode(task_type, payload.input, output)
-    latency_ms = int((time.perf_counter() - t0) * 1000)
+    latency_ms = max(1, int(round((time.perf_counter() - t0) * 1000)))
     return {
         "model_version": SUT_MODEL_VERSION,
         "output": output,

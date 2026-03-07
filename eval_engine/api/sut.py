@@ -114,7 +114,7 @@ def run(payload: RunPayload, demo_case: str | None = Query(default=None)):
         demo_case=selected_demo_case,
     )
 
-    latency_ms = int((time.perf_counter() - t0) * 1000)
+    latency_ms = max(1, int(round((time.perf_counter() - t0) * 1000)))
     return {
         "model_version": SUT_MODEL_VERSION,
         "output": output,

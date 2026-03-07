@@ -142,6 +142,7 @@ export default function HomePage() {
   const [advancedOptionsOpen, setAdvancedOptionsOpen] = useState(false);
   const [runSectionMode, setRunSectionMode] = useState<"quick" | "advanced">("quick");
   const [sutUrl, setSutUrl] = useState(`${API_BASE}/sut/run`);
+  const [quota, setQuota] = useState(1);
   const [demoCase, setDemoCase] = useState<string>("wrong_email");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -186,7 +187,7 @@ export default function HomePage() {
     try {
       const res = await apiPost<RunCreateResponse>("/runs", {
         spec_json: specJson,
-        quota: 1,
+        quota,
         sut: "http",
         sut_url: sutUrl,
         sut_timeout: 30,
@@ -332,6 +333,16 @@ export default function HomePage() {
                 />
               )}
             </div>
+
+            <label className="mb-2 block text-sm text-neutral-300">Quota</label>
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={quota}
+              onChange={(e) => setQuota(Number(e.target.value) || 1)}
+              className="mb-4 w-32 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
+            />
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button

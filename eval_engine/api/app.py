@@ -99,6 +99,16 @@ class DemoFailureRequest(BaseModel):
     case_name: str
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "name": "eval-engine-api",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/healthz",
+    }
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, Any]:
     return {"ok": True}
