@@ -1,5 +1,7 @@
 # eval-engine
 
+https://ojpxggaq2w77.jp.larksuite.com/wiki/Cp45wpdIjiHRFNkcM2VjMgnUpUe?from=from_copylink
+
 Evaluation engine for agent and model outputs, built around **typed failure detection**, **root-cause diagnosis**, and **actionable data requests**.
 
 Instead of vague failure logs, it produces structured outputs that support debugging, dataset improvement, and release gating.
