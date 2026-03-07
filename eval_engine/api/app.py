@@ -1,0 +1,209 @@
+"""
+Thin FastAPI backend over eval-engine services. Backend → service layer directly (no MCP).
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
+
+
+def default_sut_url() -> str:
+    return f"{PUBLIC_BASE_URL.rstrip('/')}/sut/run"
+
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+# Redact local paths from responses so they are not exposed in shared demos.
+_PATH_REDACTED = "[redacted]"
+
+
+def _redact_paths(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in ("run_dir", "path", "run_dir_path") and isinstance(v, str) and (
+                v.startswith("/") or "\\" in v or (len(v) > 2 and v[1] == ":")
+            ):
+                out[k] = _PATH_REDACTED
+            else:
+                out[k] = _redact_paths(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_paths(x) for x in obj]
+    return obj
+
+
+from eval_engine.services.run_index_service import (
+    get_repo_root,
+    get_run_summary,
+    get_item_result,
+    list_runs,
+)
+from eval_engine.services.artifact_service import (
+    list_run_files,
+    get_artifact_content_by_run,
+)
+from eval_engine.services.job_service import get_job_status as get_job_status_service
+from eval_engine.services.run_service import RunBatchRequest, run_batch_service
+from eval_engine.services.regression_service import (
+    RegressionRequest,
+    run_regression_service,
+)
+from eval_engine.services.demo_service import run_demo_failure
+from eval_engine.services.diagnosis_service import list_failure_clusters
+from eval_engine.services.run_view_service import get_run_events, get_eval_results
+
+from eval_engine.api.sut import router as sut_router
+
+app = FastAPI(
+    title="eval-engine-api",
+    version="1.0.0",
+    description="Thin REST API over eval-engine services",
+)
+
+# For local development only. Tighten before public deployment.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(sut_router)
+
+
+class RunBatchRequestSchema(BaseModel):
+    spec_json: str
+    quota: int = 1
+    sut: str = "http"
+    sut_url: str | None = None
+    sut_timeout: int = 30
+    model_version: str = "http-sut-local"
+
+
+class RegressionRequestSchema(BaseModel):
+    suite_path: str
+    sut_url: str | None = None
+    sut_timeout: int = 30
+    min_pass_rate: float = 0.95
+    artifacts_dir: str | None = None
+
+
+class DemoFailureRequest(BaseModel):
+    case_name: str
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
+    return {"ok": True}
+
+
+@app.get("/runs")
+def api_list_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+    return _redact_paths({"runs": list_runs(limit=limit)})
+
+
+@app.post("/runs")
+def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
+    spec = json.loads(req.spec_json)
+    request = RunBatchRequest(
+        project_root=get_repo_root(),
+        spec=spec,
+        quota=req.quota,
+        sut_name=req.sut,
+        sut_url=req.sut_url or default_sut_url(),
+        sut_timeout=req.sut_timeout,
+        model_version=req.model_version,
+    )
+    response = run_batch_service(request)
+    return _redact_paths(response.to_dict())
+
+
+@app.get("/jobs/{job_id}")
+def api_get_job_status(job_id: str) -> dict[str, Any]:
+    job = get_job_status_service(get_repo_root(), job_id)
+    if job is None:
+        return {
+            "error": {
+                "kind": "not_found",
+                "code": "JOB_NOT_FOUND",
+                "message": f"Job not found: {job_id}",
+                "details": {"job_id": job_id},
+            }
+        }
+    return job
+
+
+@app.get("/runs/{run_id}")
+def api_get_run_summary(run_id: str) -> dict[str, Any]:
+    return _redact_paths(get_run_summary(run_id))
+
+
+@app.get("/runs/{run_id}/files")
+def api_list_run_files(run_id: str) -> dict[str, Any]:
+    return _redact_paths(list_run_files(run_id))
+
+
+@app.get("/runs/{run_id}/events")
+def api_get_run_events(
+    run_id: str,
+    limit: int = Query(default=200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return get_run_events(run_id, limit=limit)
+
+
+@app.get("/runs/{run_id}/results")
+def api_get_eval_results(
+    run_id: str,
+    limit: int = Query(default=200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return get_eval_results(run_id, limit=limit)
+
+
+@app.get("/runs/{run_id}/clusters")
+def api_get_failure_clusters(run_id: str) -> dict[str, Any]:
+    return list_failure_clusters(run_id)
+
+
+@app.get("/runs/{run_id}/items/{item_id}")
+def api_get_item_result(run_id: str, item_id: str) -> dict[str, Any]:
+    result = get_item_result(run_id, item_id)
+    if not result:
+        return {
+            "error": {
+                "kind": "not_found",
+                "code": "ITEM_NOT_FOUND",
+                "message": f"Item {item_id} not found in run {run_id}",
+                "details": {"run_id": run_id, "item_id": item_id},
+            }
+        }
+    return {"content": result}
+
+
+@app.get("/runs/{run_id}/artifacts/{filename:path}")
+def api_get_artifact(run_id: str, filename: str) -> dict[str, Any]:
+    return _redact_paths(get_artifact_content_by_run(run_id, filename))
+
+
+@app.post("/regression")
+def api_run_regression(req: RegressionRequestSchema) -> dict[str, Any]:
+    request = RegressionRequest(
+        suite_path=Path(req.suite_path),
+        sut_url=req.sut_url or default_sut_url(),
+        sut_timeout=req.sut_timeout,
+        artifacts_dir=Path(req.artifacts_dir) if req.artifacts_dir else None,
+        min_pass_rate=req.min_pass_rate,
+    )
+    response = run_regression_service(request)
+    return response.to_dict()
+
+
+@app.post("/demo/failure")
+def api_run_demo_failure(req: DemoFailureRequest) -> dict[str, Any]:
+    return run_demo_failure(req.case_name, base_sut_url=default_sut_url())

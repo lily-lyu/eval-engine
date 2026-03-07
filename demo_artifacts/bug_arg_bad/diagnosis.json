@@ -1,0 +1,13 @@
+[
+  {
+    "cluster_id": "PASS",
+    "summary": "All items passed in this run; expand coverage and difficulty gradually.",
+    "root_cause_hypothesis": "No failures in this run.",
+    "recommended_owner": "eval",
+    "priority": 4,
+    "estimated_blast_radius": "none",
+    "top_examples": [],
+    "next_action": "Add harder targets, more domains, and trajectory_check tasks; run larger batch and track metrics.",
+    "count": 0
+  }
+]

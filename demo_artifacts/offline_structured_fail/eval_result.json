@@ -1,0 +1,30 @@
+{
+  "item_id": "break_structured_fail",
+  "verdict": "fail",
+  "score": 0.0,
+  "error_type": "PROGRAMMATIC_CHECK_FAILED",
+  "evidence": [
+    {
+      "kind": "programmatic_check",
+      "code": "STRUCTURED_FIELD_VALUE_MISMATCH",
+      "message": "value mismatch for field 'email': expected='alice@example.com', observed='wrong@example.com'",
+      "dimension": "structured_extraction",
+      "expected": "alice@example.com",
+      "observed": "wrong@example.com",
+      "locator": {
+        "field": "email"
+      }
+    }
+  ],
+  "raw_output_ref": {
+    "sha256": "21cb5bd83748fe028fb472755e60457ef9ca1333d2c274ad1e89a3eafc201d59",
+    "uri": "demo_artifacts/offline_structured_fail/break_structured_fail_raw.txt",
+    "mime": "text/plain",
+    "bytes": 61
+  },
+  "model_version": "break-suite",
+  "seed": 42,
+  "created_at": "2026-03-06T13:16:34.091000+00:00",
+  "task_type": "json_extract_structured",
+  "eval_method": "programmatic_check"
+}

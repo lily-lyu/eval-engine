@@ -9,3 +9,8 @@ RUN_ID
 *_raw.txt
 *.log
 =4.19.0
+node_modules/
+
+web/.next
+web/.env.local
+.cursor/mcp.json

@@ -1,13 +1,15 @@
 import json
+import os
 import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from ..core.failure_codes import DUPLICATE_ITEM, SUT_HTTP_ERROR
 from ..core.schema import validate_or_raise
+from ..core.run_index import add_run as index_add_run
 from ..core.storage import append_jsonl, ensure_dir, save_artifact_text, write_json
 from ..core.timeutil import now_iso
 from ..core.versioning import compute_tool_snapshot_hash
@@ -54,7 +56,16 @@ def _event(run_id: str, stage: str, status: str, item_id: str = "", failure_code
     return e
 
 
-def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: str, model_version: str, sut_url: str = "", sut_timeout: int = 30) -> Path:
+def run_batch(
+    project_root: Path,
+    spec: Dict[str, Any],
+    quota: int,
+    sut_name: str,
+    model_version: str,
+    sut_url: str = "",
+    sut_timeout: int = 30,
+    progress_callback: Optional[Callable[..., None]] = None,
+) -> Path:
     # Validate spec
     validate_or_raise("dataset_spec.schema.json", spec)
 
@@ -63,7 +74,8 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_id = f"run_{spec['dataset_spec_version']}_{seed}_{ts}_{uuid4().hex[:6]}"
-    run_dir = project_root / "runs" / run_id
+    runs_dir = Path(os.getenv("EVAL_ENGINE_RUNS_DIR", str(project_root / "runs")))
+    run_dir = runs_dir / run_id
     artifacts_dir = run_dir / "artifacts"
     ensure_dir(run_dir)
     ensure_dir(artifacts_dir)
@@ -72,16 +84,19 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
     events_path = run_dir / "events.jsonl"
 
     append_jsonl(events_path, [_event(run_id, "INIT", "ok", message="run started")])
+    if progress_callback:
+        progress_callback("started", run_id=run_id)
 
     batch_plan = compile_batch_plan(spec, quota, rng)
     targets = plan_to_target_list(batch_plan)
+    total_slots = len(targets)
     write_json(artifacts_dir / "batch_plan.json", {
         "quota": quota,
         "seed": seed,
         "plan": [{"target_id": e["target"]["target_id"], "count": e["count"], "task_type": e["target"]["task_type"], "difficulty": e["target"].get("difficulty"), "split": e["target"].get("split"), "risk_tier": e["target"].get("risk_tier")} for e in batch_plan],
-        "total_slots": len(targets),
+        "total_slots": total_slots,
     })
-    append_jsonl(events_path, [_event(run_id, "PLAN", "ok", message=f"batch_plan slots={len(targets)}")])
+    append_jsonl(events_path, [_event(run_id, "PLAN", "ok", message=f"batch_plan slots={total_slots}")])
 
     started_at = now_iso()
     seen_prompt_hashes: Set[str] = set()
@@ -106,6 +121,9 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
         while True:
             append_jsonl(events_path, [_event(run_id, "GENERATE_ITEM", "start", message=f"attempt={attempt} precheck_regens={precheck_regens}")])
             item = generate_item_from_target(spec, target, spec["dataset_spec_version"], rng)
+            if progress_callback:
+                progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
+                progress_callback("progress", stage="GENERATE_ITEM", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
 
             append_jsonl(events_path, [_event(run_id, "BUILD_ORACLE", "start", item_id=item["item_id"])])
             oracle = build_oracle(item)
@@ -139,6 +157,9 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
 
             append_jsonl(events_path, [_event(run_id, "QA_GATE", "ok", item_id=item["item_id"])])
             # RUN_MODEL (SUT)
+            if progress_callback:
+                progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
+                progress_callback("progress", stage="RUN_MODEL", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
             append_jsonl(events_path, [_event(run_id, "RUN_MODEL", "start", item_id=item["item_id"], message=f"sut={sut_name}")])
 
             tool_trace: Optional[List[Any]] = None
@@ -223,6 +244,9 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
             validate_or_raise("eval_result.schema.json", er)
 
             append_jsonl(events_path, [_event(run_id, "VERIFY", "ok", item_id=item["item_id"], message=f"verdict={er['verdict']} error_type={er['error_type']}")])
+            if progress_callback:
+                progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
+                progress_callback("progress", stage="VERIFY", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
 
             released_items.append(item)
             released_oracles.append(oracle)
@@ -285,6 +309,8 @@ def run_batch(project_root: Path, spec: Dict[str, Any], quota: int, sut_name: st
     }
     validate_or_raise("run_record.schema.json", run_record)
     write_json(run_dir / "run_record.json", run_record)
+    project_root = run_dir.parent.parent
+    index_add_run(project_root, run_record)
 
     append_jsonl(events_path, [_event(run_id, "END", "ok", message="run completed")])
     return run_dir

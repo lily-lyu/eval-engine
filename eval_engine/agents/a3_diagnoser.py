@@ -56,11 +56,33 @@ def _root_cause_and_owner(
     code: str,
     count: int,
     total: int,
+    task_type: str = "",
 ) -> Tuple[str, str, str]:
     """
     Heuristics: return (root_cause_hypothesis, recommended_owner, next_action).
     recommended_owner one of: data, model, tooling, product, eval.
     """
+    # Structured-extraction-specific logic by evidence_code
+    if task_type == "json_extract_structured" and "PROGRAMMATIC" in error_type:
+        if code == "STRUCTURED_FIELD_VALUE_MISMATCH":
+            return (
+                "Extractor is brittle to layout variation or distractor spans; field value chosen incorrectly.",
+                "data",
+                "Add extraction supervision for paraphrased layouts, reordered fields, and distractor-heavy examples.",
+            )
+        if code == "STRUCTURED_FIELD_MISSING":
+            return (
+                "Model is omitting required slots under multi-field extraction.",
+                "data",
+                "Add examples emphasizing full-slot coverage and missing-field penalties.",
+            )
+        if code == "STRUCTURED_EXTRA_FIELD_PRESENT":
+            return (
+                "Model over-extracts unsupported fields or fails to obey the output contract.",
+                "model",
+                "Add constrained-output examples and checker-enforced negative cases.",
+            )
+
     # Eval infra: wrong checker or unsupported method
     if code == UNKNOWN_CHECKER or code == UNSUPPORTED_EVAL_METHOD:
         return (
@@ -159,7 +181,7 @@ def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             cluster_id = f"{cluster_id}|{task_type}|{eval_method}"
 
         root_cause, recommended_owner, next_action = _root_cause_and_owner(
-            error_type, code, count, total_evaluated
+            error_type, code, count, total_evaluated, task_type
         )
         blast_tier = _blast_radius_tier(count, total_evaluated)
         estimated_blast_radius = f"{blast_tier} ({count} items in run)"

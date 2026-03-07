@@ -1,0 +1,40 @@
+{
+  "phase": "offline_structured_fail",
+  "item_id": "break_structured_fail",
+  "task_type": "json_extract_structured",
+  "verdict": "fail",
+  "error_type": "PROGRAMMATIC_CHECK_FAILED",
+  "evidence_codes": [
+    "STRUCTURED_FIELD_VALUE_MISMATCH"
+  ],
+  "diagnosis": [
+    {
+      "cluster_id": "PROGRAMMATIC_CHECK_FAILED/STRUCTURED_FIELD_VALUE_MISMATCH|json_extract_structured|programmatic_check",
+      "summary": "Cluster 'PROGRAMMATIC_CHECK_FAILED/STRUCTURED_FIELD_VALUE_MISMATCH|json_extract_structured|programmatic_check' with 1 failures (sample item_ids: ['break_structured_fail'])",
+      "root_cause_hypothesis": "Extractor is brittle to layout variation or distractor spans; field value chosen incorrectly.",
+      "recommended_owner": "data",
+      "priority": 1,
+      "estimated_blast_radius": "high (1 items in run)",
+      "top_examples": [
+        {
+          "item_id": "break_structured_fail",
+          "error_type": "PROGRAMMATIC_CHECK_FAILED",
+          "evidence_code": "STRUCTURED_FIELD_VALUE_MISMATCH"
+        }
+      ],
+      "next_action": "Add extraction supervision for paraphrased layouts, reordered fields, and distractor-heavy examples.",
+      "count": 1
+    }
+  ],
+  "data_requests": [
+    {
+      "cluster_id": "PROGRAMMATIC/STRUCTURED_EXTRACTION",
+      "issue_type": "STRUCTURED_FIELD_EXTRACTION_BAD",
+      "priority": 1,
+      "owner_type": "data",
+      "what_to_collect": "Collect distractor-heavy value selection examples; paraphrased layouts, reordered fields, and distractor spans.",
+      "template_hint": "Vary field order, separators, and distractor spans; grade correct field value under noise.",
+      "verification_eval": "Programmatic structured extraction failure rate drops."
+    }
+  ]
+}

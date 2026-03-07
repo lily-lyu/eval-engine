@@ -1,0 +1,11 @@
+[
+  {
+    "cluster_id": "TRAJECTORY/TOOL_ARGS_BAD",
+    "issue_type": "TOOL_ARGS_BAD",
+    "priority": 1,
+    "owner_type": "data",
+    "what_to_collect": "Collect tool-call examples with correct query formulation; include negative examples of malformed args.",
+    "template_hint": "Add templates that force query formatting constraints (length, keywords); grade via arg_schema.",
+    "verification_eval": "Trajectory_check arg_schema failure rate drops."
+  }
+]

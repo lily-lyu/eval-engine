@@ -105,10 +105,30 @@ def verify(
                 [{"kind": "router", "code": "UNKNOWN_CHECKER", "message": f"unknown checker_name={checker_name}"}],
                 raw_ref, model_version, seed, task_type, eval_method,
             )
-        ok, msg = checker_fn(item["input"], parsed, plan)
-        evidence = [{"kind": "programmatic_check", "message": msg}]
-        if not ok:
-            evidence[0]["code"] = (plan.get("failure_taxonomy") or ["PROGRAMMATIC_CHECK_FAILED"])[0]
+        out = checker_fn(item["input"], parsed, plan)
+        if len(out) == 2:
+            ok, msg = out
+            evidence_code = "PROGRAMMATIC_CHECK_FAILED" if not ok else ""
+            details = {}
+        else:
+            ok, msg, evidence_code, details = out
+        evidence = []
+        if ok:
+            evidence.append({"kind": "programmatic_check", "message": msg})
+        else:
+            ev = {
+                "kind": "programmatic_check",
+                "code": evidence_code or "PROGRAMMATIC_CHECK_FAILED",
+                "message": msg,
+                "dimension": "structured_extraction" if item.get("task_type") == "json_extract_structured" else "programmatic",
+            }
+            if details.get("expected") is not None:
+                ev["expected"] = details.get("expected")
+            if details.get("observed") is not None:
+                ev["observed"] = details.get("observed")
+            if details.get("field") is not None:
+                ev["locator"] = {"field": details.get("field")}
+            evidence.append(ev)
         return _result(
             item["item_id"], "pass" if ok else "fail", 1.0 if ok else 0.0,
             "" if ok else PROGRAMMATIC_CHECK_FAILED,

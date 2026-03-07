@@ -146,14 +146,27 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
 
         elif et == "PROGRAMMATIC_CHECK_FAILED":
             if task_type == "json_extract_structured":
+                # Specialize by evidence_code; keep issue_type STRUCTURED_FIELD_EXTRACTION_BAD
+                if code == "STRUCTURED_FIELD_VALUE_MISMATCH":
+                    what = "Collect distractor-heavy value selection examples; paraphrased layouts, reordered fields, and distractor spans."
+                    hint = "Vary field order, separators, and distractor spans; grade correct field value under noise."
+                elif code == "STRUCTURED_FIELD_MISSING":
+                    what = "Collect full-slot coverage examples; emphasize required fields and missing-field robustness."
+                    hint = "Add examples with all required slots filled; include missing-field penalties."
+                elif code == "STRUCTURED_EXTRA_FIELD_PRESENT":
+                    what = "Collect schema-obedience examples; model must not emit unsupported fields."
+                    hint = "Constrained-output examples and checker-enforced negative cases for extra fields."
+                else:
+                    what = "Collect structured extraction examples with paraphrased layouts, distractors, and missing-field robustness."
+                    hint = "Vary field order, separators, and distractor spans."
                 requests.append(
                     _make_request(
                         cluster_id="PROGRAMMATIC/STRUCTURED_EXTRACTION",
                         issue_type="STRUCTURED_FIELD_EXTRACTION_BAD",
                         priority=1,
                         owner_type="data",
-                        what="Collect structured extraction examples with paraphrased layouts, distractors, and missing-field robustness.",
-                        hint="Vary field order, separators, and distractor spans.",
+                        what=what,
+                        hint=hint,
                         verif="Programmatic structured extraction failure rate drops.",
                     )
                 )

@@ -3,9 +3,14 @@ import json
 import sys
 from pathlib import Path
 
-from .agents.a0_orchestrator import run_batch
-from .regression import run_regression, generate_golden_suite
+from .regression import generate_golden_suite
 from .break_suite import run_break_suite, write_break_suite_jsonl
+from .services import (
+    RunBatchRequest,
+    run_batch_service,
+    RegressionRequest,
+    run_regression_service,
+)
 
 
 def main() -> None:
@@ -54,15 +59,17 @@ def main() -> None:
     if args.cmd == "run":
         spec_path = Path(args.spec)
         spec = json.loads(spec_path.read_text(encoding="utf-8"))
-        run_dir = run_batch(
+        request = RunBatchRequest(
             project_root=project_root,
             spec=spec,
             quota=args.quota,
             sut_name=args.sut,
             model_version=args.model_version,
             sut_url=args.sut_url,
-            sut_timeout=args.sut_timeout
+            sut_timeout=args.sut_timeout,
         )
+        response = run_batch_service(request)
+        run_dir = response.run_dir
         print(f"\n✅ Run complete: {run_dir}\n")
         print(f"- events: {run_dir / 'events.jsonl'}")
         print(f"- record: {run_dir / 'run_record.json'}")
@@ -71,19 +78,20 @@ def main() -> None:
     elif args.cmd == "regression":
         suite_path = Path(args.suite)
         artifacts_dir = Path(args.artifacts_dir) if args.artifacts_dir else None
-        passed_gate, pass_rate, results, failures = run_regression(
+        request = RegressionRequest(
             suite_path=suite_path,
             sut_url=args.sut_url,
             sut_timeout=args.sut_timeout,
             artifacts_dir=artifacts_dir,
             min_pass_rate=args.min_pass_rate,
         )
-        print(f"Regression: pass_rate={pass_rate:.2%} min_pass_rate={args.min_pass_rate:.2%} gate={'PASS' if passed_gate else 'FAIL'}")
-        if failures:
-            print(f"Failures ({len(failures)}):")
-            for r in failures[:10]:
+        response = run_regression_service(request)
+        print(f"Regression: pass_rate={response.pass_rate:.2%} min_pass_rate={response.min_pass_rate:.2%} gate={'PASS' if response.passed_gate else 'FAIL'}")
+        if response.failures:
+            print(f"Failures ({len(response.failures)}):")
+            for r in response.failures[:10]:
                 print(f"  - {r['item_id']} verdict={r['verdict']} error_type={r.get('error_type')}")
-        if not passed_gate:
+        if not response.passed_gate:
             sys.exit(1)
 
     elif args.cmd == "generate-golden":
@@ -118,18 +126,19 @@ def main() -> None:
             for e in errors:
                 print(f"  ERROR: {e}")
             sys.exit(1)
-        passed_gate, pass_rate, _, failures = run_regression(
+        reg_request = RegressionRequest(
             suite_path=Path(args.golden_suite),
             sut_url=args.sut_url,
             sut_timeout=args.sut_timeout,
             artifacts_dir=artifacts_dir,
             min_pass_rate=args.min_pass_rate,
         )
-        print(f"Regression: pass_rate={pass_rate:.2%} gate={'PASS' if passed_gate else 'FAIL'}")
-        if failures:
-            for r in failures[:10]:
+        reg_response = run_regression_service(reg_request)
+        print(f"Regression: pass_rate={reg_response.pass_rate:.2%} gate={'PASS' if reg_response.passed_gate else 'FAIL'}")
+        if reg_response.failures:
+            for r in reg_response.failures[:10]:
                 print(f"  - {r['item_id']} verdict={r['verdict']} error_type={r.get('error_type')}")
-        if not passed_gate:
+        if not reg_response.passed_gate:
             sys.exit(1)
 
 

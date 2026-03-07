@@ -1,0 +1,55 @@
+{
+  "item_id": "break_traj_args",
+  "verdict": "fail",
+  "score": 0.0,
+  "error_type": "TRAJECTORY_CHECK_FAILED",
+  "evidence": [
+    {
+      "kind": "trajectory_check",
+      "code": "TOOL_ARGS_SCHEMA_FAILED",
+      "dimension": "schema",
+      "tool_name": "search_email_db",
+      "expected": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "observed": {
+        "args": {
+          "query": "x"
+        },
+        "validation_errors": [
+          {
+            "path": [
+              "query"
+            ],
+            "message": "'x' is too short"
+          }
+        ]
+      },
+      "message": "arg_schema failed for search_email_db: ['query']: 'x' is too short"
+    }
+  ],
+  "raw_output_ref": {
+    "sha256": "30a4794a8208d3ccbf9f2e469015ffde61ca4da81a53f6f47ac2c73d451f54cf",
+    "uri": "demo_artifacts/offline_bug_arg_bad/break_traj_args_raw.txt",
+    "mime": "text/plain",
+    "bytes": 28
+  },
+  "model_version": "break-suite",
+  "seed": 42,
+  "created_at": "2026-03-06T11:06:49.207214+00:00",
+  "task_type": "trajectory_email_then_answer",
+  "eval_method": "trajectory_check"
+}

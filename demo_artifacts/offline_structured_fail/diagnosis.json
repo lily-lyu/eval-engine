@@ -1,0 +1,19 @@
+[
+  {
+    "cluster_id": "PROGRAMMATIC_CHECK_FAILED/STRUCTURED_FIELD_VALUE_MISMATCH|json_extract_structured|programmatic_check",
+    "summary": "Cluster 'PROGRAMMATIC_CHECK_FAILED/STRUCTURED_FIELD_VALUE_MISMATCH|json_extract_structured|programmatic_check' with 1 failures (sample item_ids: ['break_structured_fail'])",
+    "root_cause_hypothesis": "Extractor is brittle to layout variation or distractor spans; field value chosen incorrectly.",
+    "recommended_owner": "data",
+    "priority": 1,
+    "estimated_blast_radius": "high (1 items in run)",
+    "top_examples": [
+      {
+        "item_id": "break_structured_fail",
+        "error_type": "PROGRAMMATIC_CHECK_FAILED",
+        "evidence_code": "STRUCTURED_FIELD_VALUE_MISMATCH"
+      }
+    ],
+    "next_action": "Add extraction supervision for paraphrased layouts, reordered fields, and distractor-heavy examples.",
+    "count": 1
+  }
+]

@@ -2,3 +2,5 @@ jsonschema>=4.19.0
 fastapi>=0.100.0
 uvicorn>=0.22.0
 pytest>=7.0.0
+# Official MCP Python SDK (includes FastMCP); optional: mcp[cli] for dev tools
+mcp>=1.0.0

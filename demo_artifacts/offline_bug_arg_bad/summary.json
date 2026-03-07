@@ -1,0 +1,40 @@
+{
+  "phase": "offline_bugged",
+  "item_id": "break_traj_args",
+  "task_type": "trajectory_email_then_answer",
+  "verdict": "fail",
+  "error_type": "TRAJECTORY_CHECK_FAILED",
+  "evidence_codes": [
+    "TOOL_ARGS_SCHEMA_FAILED"
+  ],
+  "diagnosis": [
+    {
+      "cluster_id": "TRAJECTORY_CHECK_FAILED/TOOL_ARGS_SCHEMA_FAILED|trajectory_email_then_answer|trajectory_check",
+      "summary": "Cluster 'TRAJECTORY_CHECK_FAILED/TOOL_ARGS_SCHEMA_FAILED|trajectory_email_then_answer|trajectory_check' with 1 failures (sample item_ids: ['break_traj_args'])",
+      "root_cause_hypothesis": "Tool-call arguments fail schema (e.g. query format, length); model or tool contract mismatch.",
+      "recommended_owner": "tooling",
+      "priority": 1,
+      "estimated_blast_radius": "high (1 items in run)",
+      "top_examples": [
+        {
+          "item_id": "break_traj_args",
+          "error_type": "TRAJECTORY_CHECK_FAILED",
+          "evidence_code": "TOOL_ARGS_SCHEMA_FAILED"
+        }
+      ],
+      "next_action": "Align tool arg_schema with actual usage; add data/examples for correct query formulation; consider data if many variants fail.",
+      "count": 1
+    }
+  ],
+  "data_requests": [
+    {
+      "cluster_id": "TRAJECTORY/TOOL_ARGS_BAD",
+      "issue_type": "TOOL_ARGS_BAD",
+      "priority": 1,
+      "owner_type": "data",
+      "what_to_collect": "Collect tool-call examples with correct query formulation; include negative examples of malformed args.",
+      "template_hint": "Add templates that force query formatting constraints (length, keywords); grade via arg_schema.",
+      "verification_eval": "Trajectory_check arg_schema failure rate drops."
+    }
+  ]
+}

@@ -1,18 +1,21 @@
+"""
+Mock SUT router: /sut/run for eval-engine batch and regression calls.
+Supports demo_case query param for intentional failures.
+"""
 import json
 import os
 import re
 import time
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from eval_engine.tasks.registry import get_task_registry
 
-app = FastAPI()
+router = APIRouter(prefix="/sut", tags=["sut"])
 
-# Set this to your real model identifier when deploying (e.g. "doubao-pro-xxx")
-SUT_MODEL_VERSION = "http-sut-local"
+SUT_MODEL_VERSION = os.getenv("SUT_MODEL_VERSION", "http-sut-local")
 
 
 class RunPayload(BaseModel):
@@ -36,12 +39,27 @@ def _run_registry_mock(task_type: str, inp: dict) -> dict:
         return {}
 
 
-def _apply_trajectory_test_mode(task_type: str, inp: dict, output: dict) -> tuple[dict, list]:
+def _apply_demo_case(
+    task_type: str,
+    inp: dict,
+    output: dict,
+    demo_case: str,
+) -> tuple[dict, list]:
     tool_trace: list = []
+
+    if demo_case == "wrong_email" and task_type == "json_extract_email":
+        return {"email": "definitely_wrong@example.com"}, []
+
+    if demo_case == "wrong_sentiment" and task_type == "json_classify_sentiment":
+        return {"label": "negative"}, []
+
+    if demo_case == "wrong_math" and task_type == "json_math_add":
+        a = inp.get("a", 0)
+        b = inp.get("b", 0)
+        return {"answer": a + b + 1}, []
+
     if task_type != "trajectory_email_then_answer":
         return output, tool_trace
-
-    mode = os.environ.get("TRAJECTORY_TEST_MODE", "").strip().lower()
 
     text = inp.get("text", "")
     m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
@@ -49,11 +67,13 @@ def _apply_trajectory_test_mode(task_type: str, inp: dict, output: dict) -> tupl
 
     args_obj = {"query": text}
     result_obj = {"email": extracted_email}
+    final_output = output
 
-    if mode == "arg_bad":
+    if demo_case == "traj_arg_bad":
         args_obj = {"text": text}
-    if mode == "binding_mismatch":
-        output = {"email": "wrong@example.com"}
+
+    if demo_case == "traj_binding_mismatch":
+        final_output = {"email": "wrong@example.com"}
 
     base = {
         "name": "search_email_db",
@@ -62,52 +82,38 @@ def _apply_trajectory_test_mode(task_type: str, inp: dict, output: dict) -> tupl
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    if mode == "missing":
+    if demo_case == "traj_missing":
         tool_trace = []
-    elif mode == "too_many":
+    elif demo_case == "traj_too_many":
         tool_trace = [base, {**base, "timestamp": datetime.now(timezone.utc).isoformat()}]
-    elif mode == "wrong_order":
+    elif demo_case == "traj_wrong_order":
         tool_trace = [
             {"name": "other_tool", "args": {}, "result": None, "timestamp": datetime.now(timezone.utc).isoformat()},
-            {
-                "name": "search_email_db",
-                "args": args_obj,
-                "result": result_obj,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
+            {"name": "search_email_db", "args": args_obj, "result": result_obj, "timestamp": datetime.now(timezone.utc).isoformat()},
         ]
     else:
         tool_trace = [base]
 
-    return output, tool_trace
+    return final_output, tool_trace
 
 
-@app.post("/run")
+@router.post("/run")
 def run(payload: RunPayload, demo_case: str | None = Query(default=None)):
     t0 = time.perf_counter()
     task_type = payload.task_type or ""
 
-    # Intentional failure demo: exact-match wrong email
-    if demo_case == "wrong_email" and task_type == "json_extract_email":
-        return {
-            "model_version": SUT_MODEL_VERSION,
-            "output": {"email": "definitely_wrong@example.com"},
-            "latency_ms": 5,
-            "tool_trace": [],
-        }
-
-    # Intentional failure demo: wrong sentiment label
-    if demo_case == "wrong_sentiment" and task_type == "json_classify_sentiment":
-        return {
-            "model_version": SUT_MODEL_VERSION,
-            "output": {"label": "negative"},
-            "latency_ms": 5,
-            "tool_trace": [],
-        }
-
-    # Normal stub behavior
     output = _run_registry_mock(task_type, payload.input)
-    output, tool_trace = _apply_trajectory_test_mode(task_type, payload.input, output)
+
+    env_mode = os.environ.get("TRAJECTORY_TEST_MODE", "").strip().lower()
+    selected_demo_case = (demo_case or env_mode or "").strip().lower()
+
+    output, tool_trace = _apply_demo_case(
+        task_type=task_type,
+        inp=payload.input,
+        output=output,
+        demo_case=selected_demo_case,
+    )
+
     latency_ms = int((time.perf_counter() - t0) * 1000)
     return {
         "model_version": SUT_MODEL_VERSION,

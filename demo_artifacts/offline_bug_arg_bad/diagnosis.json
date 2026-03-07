@@ -1,0 +1,19 @@
+[
+  {
+    "cluster_id": "TRAJECTORY_CHECK_FAILED/TOOL_ARGS_SCHEMA_FAILED|trajectory_email_then_answer|trajectory_check",
+    "summary": "Cluster 'TRAJECTORY_CHECK_FAILED/TOOL_ARGS_SCHEMA_FAILED|trajectory_email_then_answer|trajectory_check' with 1 failures (sample item_ids: ['break_traj_args'])",
+    "root_cause_hypothesis": "Tool-call arguments fail schema (e.g. query format, length); model or tool contract mismatch.",
+    "recommended_owner": "tooling",
+    "priority": 1,
+    "estimated_blast_radius": "high (1 items in run)",
+    "top_examples": [
+      {
+        "item_id": "break_traj_args",
+        "error_type": "TRAJECTORY_CHECK_FAILED",
+        "evidence_code": "TOOL_ARGS_SCHEMA_FAILED"
+      }
+    ],
+    "next_action": "Align tool arg_schema with actual usage; add data/examples for correct query formulation; consider data if many variants fail.",
+    "count": 1
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "scenario_id": "structured_extraction_fail",
+  "item": {
+    "dataset_spec_version": "1.0.0",
+    "domain_tags": [
+      "extraction"
+    ],
+    "difficulty": "easy",
+    "task_type": "json_extract_structured",
+    "input": {
+      "text": "Name: Alice; Email: alice@example.com; Company: Acme"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "email",
+        "company"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "company": {
+          "type": "string"
+        }
+      }
+    },
+    "constraints": {
+      "no_subjective_judgement": true,
+      "safety_notes": "",
+      "locked_fields": [
+        "dataset_spec_version",
+        "domain_tags",
+        "difficulty",
+        "task_type"
+      ]
+    },
+    "provenance": {
+      "created_at": "2026-03-06T00:00:00+00:00",
+      "created_by": "break_suite",
+      "source": "synthetic"
+    },
+    "item_id": "break_structured_fail",
+    "prompt": "Extract fields from text."
+  },
+  "oracle": {
+    "method_justification": "Break suite.",
+    "evidence_requirements": null,
+    "created_at": "2026-03-06T00:00:00+00:00",
+    "item_id": "break_structured_fail",
+    "eval_method": "programmatic_check",
+    "expected": {
+      "name": "Alice",
+      "email": "alice@example.com",
+      "company": "Acme"
+    },
+    "leak_check": {
+      "passed": true,
+      "notes": ""
+    },
+    "checker_name": "structured_extraction_v1"
+  },
+  "raw_output": "{\"name\":\"Alice\",\"email\":\"wrong@example.com\",\"company\":\"Acme\"}",
+  "expected_verdict": "fail",
+  "expected_error_type": "PROGRAMMATIC_CHECK_FAILED"
+}

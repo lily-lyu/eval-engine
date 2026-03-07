@@ -1,0 +1,11 @@
+[
+  {
+    "cluster_id": "PROGRAMMATIC/STRUCTURED_EXTRACTION",
+    "issue_type": "STRUCTURED_FIELD_EXTRACTION_BAD",
+    "priority": 1,
+    "owner_type": "data",
+    "what_to_collect": "Collect distractor-heavy value selection examples; paraphrased layouts, reordered fields, and distractor spans.",
+    "template_hint": "Vary field order, separators, and distractor spans; grade correct field value under noise.",
+    "verification_eval": "Programmatic structured extraction failure rate drops."
+  }
+]

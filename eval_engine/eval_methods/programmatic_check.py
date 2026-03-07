@@ -48,37 +48,82 @@ def run_programmatic_check_structured_extraction(
     item_input: Dict[str, Any],
     parsed_output: Dict[str, Any],
     plan: Optional[Dict[str, Any]] = None,
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, str, Dict[str, Any]]:
     """
-    Check extracted JSON fields against expected. Uses plan["expected"] and
-    plan.get("checker_config", {}).get("field_normalize") e.g. {"email": "strip_lower", "name": "strip"}.
+    Check extracted JSON fields against expected. Returns (ok, msg, evidence_code, details).
+    Uses plan["expected"] and plan.get("checker_config", {}).get("field_normalize") e.g. {"email": "strip_lower", "name": "strip"}.
     """
+    empty_details: Dict[str, Any] = {}
     if not plan or plan.get("expected") is None:
-        return False, "structured_extraction checker requires plan with expected"
+        return (
+            False,
+            "structured_extraction checker requires plan with expected",
+            "STRUCTURED_CHECK_CONFIG_ERROR",
+            empty_details,
+        )
 
     expected = plan["expected"]
     if not isinstance(expected, dict):
-        return False, "structured_extraction expected must be a dict"
+        return (
+            False,
+            "structured_extraction expected must be a dict",
+            "STRUCTURED_CHECK_CONFIG_ERROR",
+            empty_details,
+        )
 
     config = plan.get("checker_config") or {}
+    required_fields = config.get("required_fields", list(expected.keys()))
     field_normalize = config.get("field_normalize") or {}
 
-    for key, exp_val in expected.items():
-        if key not in parsed_output:
-            return False, f"structured_extraction missing field: {key}"
+    # missing field
+    for field in required_fields:
+        if field not in parsed_output:
+            return (
+                False,
+                f"missing required field: {field}",
+                "STRUCTURED_FIELD_MISSING",
+                {
+                    "field": field,
+                    "expected": expected.get(field),
+                    "observed": None,
+                },
+            )
 
-        raw_val = parsed_output[key]
-        norm_name = field_normalize.get(key)
+    # extra field
+    allowed = set(required_fields)
+    extra_fields = [k for k in parsed_output.keys() if k not in allowed]
+    if extra_fields:
+        return (
+            False,
+            f"unexpected extra field(s): {extra_fields}",
+            "STRUCTURED_EXTRA_FIELD_PRESENT",
+            {"fields": extra_fields},
+        )
+
+    # value mismatch (with optional normalization)
+    for field in required_fields:
+        exp_val = expected.get(field)
+        raw_val = parsed_output.get(field)
+        norm_name = field_normalize.get(field)
         if norm_name:
             fn = NORMALIZERS.get(norm_name)
             if fn:
                 raw_val = fn(raw_val)
                 exp_val = fn(exp_val) if exp_val is not None else ""
+        obs_val = raw_val
+        if obs_val != exp_val:
+            return (
+                False,
+                f"value mismatch for field '{field}': expected={exp_val!r}, observed={obs_val!r}",
+                "STRUCTURED_FIELD_VALUE_MISMATCH",
+                {
+                    "field": field,
+                    "expected": exp_val,
+                    "observed": obs_val,
+                },
+            )
 
-        if raw_val != exp_val:
-            return False, f"structured_extraction field '{key}': expected {exp_val!r}, got {parsed_output[key]!r}"
-
-    return True, "programmatic_check passed (structured_extraction: all fields match)"
+    return True, "structured extraction check passed", "", empty_details
 
 
 # ---- classification_canonical_v1: label set enforcement + canonicalization ----

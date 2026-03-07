@@ -1,0 +1,46 @@
+import json
+from pathlib import Path
+
+bug = json.loads(Path("demo_artifacts/offline_bug_arg_bad/summary.json").read_text(encoding="utf-8"))
+
+md = []
+md.append("# Eval Engine Demo — Failure Detection to Recovery")
+md.append("")
+md.append("## Scenario")
+md.append("Injected failure: trajectory tool call uses the wrong args schema (`text` instead of required `query`).")
+md.append("")
+md.append("## Failure detection")
+md.append(f"- Item ID: **{bug['item_id']}**")
+md.append(f"- Task Type: **{bug['task_type']}**")
+md.append(f"- Verdict: **{bug['verdict']}**")
+md.append(f"- Error Type: **{bug['error_type']}**")
+md.append(f"- Evidence Codes: **{bug['evidence_codes']}**")
+md.append("")
+md.append("## Diagnosis")
+for p in bug["diagnosis"]:
+    md.append(f"- **Cluster:** `{p['cluster_id']}`")
+    md.append(f"  - Root cause: {p['root_cause_hypothesis']}")
+    md.append(f"  - Owner: {p['recommended_owner']}")
+    md.append(f"  - Next action: {p['next_action']}")
+md.append("")
+md.append("## Closed-loop action")
+for r in bug["data_requests"]:
+    md.append(f"- **Issue type:** `{r['issue_type']}`")
+    md.append(f"  - What to collect: {r['what_to_collect']}")
+    md.append(f"  - Verification eval: {r['verification_eval']}")
+md.append("")
+md.append("## Recovery")
+md.append("- Removed the injected bug / returned to clean server behavior.")
+md.append("- Re-ran the release gate.")
+md.append("- `make gate` passed successfully.")
+md.append("")
+md.append("## What this demonstrates")
+md.append("- Typed failure detection")
+md.append("- Root-cause-oriented diagnosis")
+md.append("- Actionable data/backlog generation")
+md.append("- Verifiable recovery through the release gate")
+md.append("")
+
+out = Path("docs/case_studies/tool_args_failure_recovery.md")
+out.write_text("\n".join(md), encoding="utf-8")
+print(f"Wrote {out}")
