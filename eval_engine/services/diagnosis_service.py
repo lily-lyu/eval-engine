@@ -36,26 +36,25 @@ def _run_dir(project_root: Path, run_id: str) -> Path:
     return project_root / "runs" / run_id
 
 
-def diagnose_failures(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def diagnose_failures(eval_results: List[Dict[str, Any]]) -> tuple:
     """
-    Cluster failures and return action plans (root cause, owner, blast radius, etc.).
-    Same as batch pipeline diagnosis; no I/O.
+    Cluster failures and return (clusters, action_plans). Same as batch pipeline diagnosis; no I/O.
     """
     return diagnose(eval_results)
 
 
 def get_run_diagnosis(project_root: Path, run_id: str) -> Dict[str, Any]:
     """
-    Load eval_results from run, run diagnosis, return clusters/action plans.
-    Returns dict with "action_plans" list and "run_id".
+    Load eval_results from run, run diagnosis, return clusters and action plans.
+    Returns dict with "clusters", "action_plans", and "run_id".
     """
     run_dir = _run_dir(project_root, run_id)
     path = run_dir / "eval_results.jsonl"
     if not path.exists():
-        return {"action_plans": [], "run_id": run_id}
+        return {"clusters": [], "action_plans": [], "run_id": run_id}
     eval_results = read_jsonl(path)
-    action_plans = diagnose(eval_results)
-    return {"action_plans": action_plans, "run_id": run_id}
+    clusters, action_plans = diagnose(eval_results)
+    return {"clusters": clusters, "action_plans": action_plans, "run_id": run_id}
 
 
 def list_failure_clusters(run_id: str) -> Dict[str, Any]:

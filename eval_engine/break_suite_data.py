@@ -166,7 +166,7 @@ def build_break_suite_rows() -> List[Dict[str, Any]]:
                 output_schema={"type": "object", "additionalProperties": False, "required": ["label"], "properties": {"label": {"type": "string", "enum": ["positive", "neutral", "negative"]}}},
             ),
             "oracle": _oracle("break_rubric_no_ev", "rubric_judge", {"label": "neutral"}, evidence_requirements=None),
-            "expected_qa_failure_code": "SCHEMA_INVALID",
+            "expected_qa_failure_code": "RUBRIC_INCOMPLETE",
         },
         {
             "scenario_id": "answer_leakage_into_prompt",

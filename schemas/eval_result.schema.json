@@ -56,6 +56,24 @@
     "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
     "created_at": { "type": "string", "format": "date-time" },
     "task_type": { "type": "string", "minLength": 0, "maxLength": 128 },
-    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 }
+    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 },
+
+    "verification_ladder": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["method", "ran", "passed", "reason"],
+        "properties": {
+          "method": { "type": "string" },
+          "ran": { "type": "boolean" },
+          "passed": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "judge_artifacts_ref": { "type": "object" },
+
+    "version_bundle": { "$ref": "version_bundle.schema.json" }
   }
 }

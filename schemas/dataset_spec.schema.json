@@ -47,10 +47,16 @@
               "json_classify_sentiment",
               "trajectory_email_then_answer",
               "json_extract_structured",
-              "json_classify_canonical"
+              "json_classify_canonical",
+              "factual_grounded_qa"
             ]
           },
           "quota_weight": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "source_policy": {
+            "type": "string",
+            "enum": ["synthetic", "web_grounded", "image_grounded"]
+          },
+          "eval_intent": { "type": "string", "minLength": 1, "maxLength": 64 },
           "min_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
           "max_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
           "risk_tier": { "type": "string", "minLength": 1, "maxLength": 32 },

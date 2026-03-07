@@ -13,11 +13,13 @@ def package_run(
     items: List[Dict[str, Any]],
     oracles: List[Dict[str, Any]],
     eval_results: List[Dict[str, Any]],
+    clusters: List[Dict[str, Any]],
     action_plans: List[Dict[str, Any]],
     attempted_total: Optional[int] = None,
     item_abort_total: Optional[int] = None,
     latency_ms_list: Optional[List[Optional[int]]] = None,
     data_requests: Optional[List[Dict[str, Any]]] = None,
+    release_manifest: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     # Validate records before packaging
     for it in items:
@@ -26,17 +28,27 @@ def package_run(
         validate_or_raise("oracle.schema.json", oc)
     for er in eval_results:
         validate_or_raise("eval_result.schema.json", er)
+    for cl in clusters:
+        validate_or_raise("failure_cluster.schema.json", cl)
     for ap in action_plans:
         validate_or_raise("action_plan.schema.json", ap)
 
-    # Emit JSONLs
+    # Emit JSONLs (clusters = analytical; action_plans = operational)
     append_jsonl(run_dir / "released_items.jsonl", items)
     append_jsonl(run_dir / "released_oracles.jsonl", oracles)
     append_jsonl(run_dir / "eval_results.jsonl", eval_results)
+    append_jsonl(run_dir / "clusters.jsonl", clusters)
     append_jsonl(run_dir / "action_plans.jsonl", action_plans)
 
     if data_requests is not None:
         append_jsonl(run_dir / "data_requests.jsonl", data_requests)
+
+    if release_manifest is not None:
+        for row in release_manifest:
+            out = dict(row)
+            if out.get("released_at") == "":
+                out["released_at"] = now_iso()
+            append_jsonl(run_dir / "release_manifest.jsonl", [out])
 
     # Run summary
     total = len(items)

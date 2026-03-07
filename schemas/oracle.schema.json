@@ -22,9 +22,9 @@
         "programmatic_check",
         "schema_check",
         "exact_match",
-        "unit_test",
         "trajectory_check",
-        "rubric_judge"
+        "rubric_judge",
+        "unit_test"
       ]
     },
 
@@ -55,6 +55,20 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1, "maxLength": 128 }
     },
-    "canonicalization_rules": { "type": "array", "items": {} }
+    "canonicalization_rules": { "type": "array", "items": {} },
+
+    "candidate_methods": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "selected_method": { "type": "string" },
+    "selection_rationale": { "type": "string" },
+    "rejected_methods": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "rubric_schema_version": { "type": "string" },
+
+    "version_bundle": { "$ref": "version_bundle.schema.json" }
   }
 }

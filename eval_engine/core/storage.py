@@ -46,3 +46,9 @@ def save_artifact_text(artifacts_dir: Path, filename: str, text: str, mime: str 
         "bytes": len(b),
         "created_at": now_iso()
     }
+
+
+def save_artifact_json(artifacts_dir: Path, filename: str, obj: Any) -> Dict[str, Any]:
+    """Write a JSON-serializable object to artifacts_dir/filename; return ref dict (sha256, uri, mime, bytes, created_at)."""
+    text = json.dumps(obj, ensure_ascii=False, indent=2)
+    return save_artifact_text(artifacts_dir, filename, text, mime="application/json")

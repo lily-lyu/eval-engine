@@ -7,16 +7,25 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from ..core.failure_codes import DUPLICATE_ITEM, SUT_HTTP_ERROR
-from ..core.schema import validate_or_raise
+from ..core.failure_codes import DISTRIBUTION_MISMATCH, DUPLICATE_ITEM, SUT_HTTP_ERROR, TASK_DEFINITION_DRIFT
+from ..core.handoffs import emit_handoff
 from ..core.run_index import add_run as index_add_run
-from ..core.storage import append_jsonl, ensure_dir, save_artifact_text, write_json
+from ..core.schema import validate_or_raise
+from ..core.storage import append_jsonl, ensure_dir, save_artifact_json, save_artifact_text, write_json
 from ..core.timeutil import now_iso
-from ..core.versioning import compute_tool_snapshot_hash
+from ..core.versioning import build_version_bundle, compute_tool_snapshot_hash
 
 # QA failures that are "stat-gate" / data issues: regenerate without burning retry budget
 STAT_GATE_FAILURE_CODES = frozenset({DUPLICATE_ITEM})
 MAX_PRECHECK_REGENS = 25  # max regenerations for stat-gate failures before aborting this slot
+
+
+def assert_locked_fields_unchanged(old_item: Dict[str, Any], new_item: Dict[str, Any]) -> None:
+    """Raise if any locked field changed between old and new item (regen drift check)."""
+    locked = old_item.get("constraints", {}).get("locked_fields") or []
+    for field in locked:
+        if old_item.get(field) != new_item.get(field):
+            raise ValueError(f"{TASK_DEFINITION_DRIFT}:{field}")
 
 from .a1_item_generator import generate_item_from_target
 from .a1b_oracle_builder import build_oracle
@@ -81,6 +90,7 @@ def run_batch(
     ensure_dir(artifacts_dir)
 
     tool_snapshot_hash = compute_tool_snapshot_hash(project_root)
+    version_bundle = build_version_bundle(spec, model_version, tool_snapshot_hash, seed)
     events_path = run_dir / "events.jsonl"
 
     append_jsonl(events_path, [_event(run_id, "INIT", "ok", message="run started")])
@@ -98,6 +108,13 @@ def run_batch(
     })
     append_jsonl(events_path, [_event(run_id, "PLAN", "ok", message=f"batch_plan slots={total_slots}")])
 
+    # Planned counts per (task_type, difficulty, split) for stat-gate distribution
+    planned_counts: Dict[Tuple[str, str, str], int] = {}
+    for t in targets:
+        key = (t.get("task_type", ""), t.get("difficulty", ""), t.get("split", ""))
+        planned_counts[key] = planned_counts.get(key, 0) + 1
+    actual_counts: Dict[Tuple[str, str, str], int] = {}
+
     started_at = now_iso()
     seen_prompt_hashes: Set[str] = set()
     model_versions_seen: Set[str] = set()
@@ -105,6 +122,7 @@ def run_batch(
     released_items: List[Dict[str, Any]] = []
     released_oracles: List[Dict[str, Any]] = []
     eval_results: List[Dict[str, Any]] = []
+    release_refs: List[Dict[str, Any]] = []
 
     max_retries = int(spec["defaults"]["max_retries_per_stage"])
 
@@ -115,47 +133,105 @@ def run_batch(
 
     for idx, target in enumerate(targets):
         attempted_total += 1
-        # A0 state machine per item: precheck loop (stat-gate regens) vs real retries (template/schema)
-        attempt = 1  # current "real" attempt (only incremented on template/schema failures)
+        attempt = 1
         precheck_regens = 0
+        previous_failed_item: Optional[Dict[str, Any]] = None
         while True:
             append_jsonl(events_path, [_event(run_id, "GENERATE_ITEM", "start", message=f"attempt={attempt} precheck_regens={precheck_regens}")])
             item = generate_item_from_target(spec, target, spec["dataset_spec_version"], rng)
+            if previous_failed_item is not None:
+                assert_locked_fields_unchanged(previous_failed_item, item)
+                previous_failed_item = None
+            item["version_bundle"] = version_bundle
+            item_ref = save_artifact_json(artifacts_dir, f"{item['item_id']}_a1_item.json", item)
+            emit_handoff(
+                run_dir=run_dir,
+                run_id=run_id,
+                item_id=item["item_id"],
+                agent_id="A1",
+                stage="GENERATE_ITEM",
+                status="ok",
+                output_ref=item_ref,
+                version_bundle=version_bundle,
+            )
             if progress_callback:
                 progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
                 progress_callback("progress", stage="GENERATE_ITEM", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
 
             append_jsonl(events_path, [_event(run_id, "BUILD_ORACLE", "start", item_id=item["item_id"])])
             oracle = build_oracle(item)
+            oracle["version_bundle"] = version_bundle
+            oracle_ref = save_artifact_json(artifacts_dir, f"{item['item_id']}_a1b_oracle.json", oracle)
+            emit_handoff(
+                run_dir=run_dir,
+                run_id=run_id,
+                item_id=item["item_id"],
+                agent_id="A1b",
+                stage="BUILD_ORACLE",
+                status="ok",
+                output_ref=oracle_ref,
+                version_bundle=version_bundle,
+            )
 
             append_jsonl(events_path, [_event(run_id, "QA_GATE", "start", item_id=item["item_id"])])
-            report = qa_check(spec, item, oracle, seen_prompt_hashes)
+            report = qa_check(spec, item, oracle, seen_prompt_hashes, actual_counts=actual_counts, planned_counts=planned_counts)
 
-            # Always validate QA report schema
             validate_or_raise("qa_audit_report.schema.json", report)
+            save_artifact_text(
+                artifacts_dir,
+                f"{item['item_id']}_qa_report.json",
+                json.dumps(report, ensure_ascii=False, indent=2),
+                mime="application/json",
+            )
+            qa_ref = {"uri": f"artifacts/{item['item_id']}_qa_report.json"}
 
             if not report["passed"]:
                 qa_failed_total += 1
-                append_jsonl(events_path, [_event(run_id, "QA_GATE", "fail", item_id=item["item_id"], failure_code=report["failure_code"], message=report["explanation"])])
                 failure_code = report["failure_code"]
+                append_jsonl(events_path, [_event(
+                    run_id,
+                    "QA_GATE",
+                    "fail",
+                    item_id=item["item_id"],
+                    failure_code=failure_code,
+                    message=report["explanation"],
+                    ref=qa_ref,
+                )])
 
+                if failure_code == DISTRIBUTION_MISMATCH:
+                    # Slot overfilled; abort this slot
+                    break
                 if failure_code in STAT_GATE_FAILURE_CODES:
-                    # Data/stat issue: regenerate without burning retry budget
                     precheck_regens += 1
                     if precheck_regens >= MAX_PRECHECK_REGENS:
                         item_abort_total += 1
                         append_jsonl(events_path, [_event(run_id, "ITEM_ABORT", "fail", item_id=item["item_id"], failure_code=failure_code, message="max precheck regens exceeded")])
                         break
+                    previous_failed_item = item
                     continue
-                # Real template/schema issue: counts as retry
                 attempt += 1
                 if attempt > max_retries:
                     item_abort_total += 1
                     append_jsonl(events_path, [_event(run_id, "ITEM_ABORT", "fail", item_id=item["item_id"], failure_code=failure_code, message="max retries exceeded")])
                     break
+                previous_failed_item = item
                 continue
 
-            append_jsonl(events_path, [_event(run_id, "QA_GATE", "ok", item_id=item["item_id"])])
+            append_jsonl(events_path, [_event(run_id, "QA_GATE", "ok", item_id=item["item_id"], ref=qa_ref)])
+            slot_key = (item.get("task_type", ""), item.get("difficulty", ""), item.get("split", ""))
+            actual_counts[slot_key] = actual_counts.get(slot_key, 0) + 1
+            report["version_bundle"] = version_bundle
+            report_ref = save_artifact_json(artifacts_dir, f"{item['item_id']}_a4_qa_report.json", report)
+            emit_handoff(
+                run_dir=run_dir,
+                run_id=run_id,
+                item_id=item["item_id"],
+                agent_id="A4",
+                stage="QA_GATE",
+                status="ok",
+                output_ref=report_ref,
+                version_bundle=version_bundle,
+            )
             # RUN_MODEL (SUT)
             if progress_callback:
                 progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
@@ -199,8 +275,17 @@ def run_batch(
                         "seed": seed,
                         "created_at": now_iso(),
                     }
+                    er["version_bundle"] = build_version_bundle(spec, model_version, tool_snapshot_hash, seed)
                     validate_or_raise("eval_result.schema.json", er)
                     model_versions_seen.add(model_version)
+                    er_ref_http = save_artifact_json(artifacts_dir, f"{item['item_id']}_a2_eval_result.json", er)
+                    release_refs.append({
+                        "item_id": item["item_id"],
+                        "item_ref": item_ref,
+                        "oracle_ref": oracle_ref,
+                        "qa_ref": report_ref,
+                        "eval_ref": er_ref_http,
+                    })
                     released_items.append(item)
                     released_oracles.append(oracle)
                     eval_results.append(er)
@@ -241,13 +326,32 @@ def run_batch(
             # VERIFY
             append_jsonl(events_path, [_event(run_id, "VERIFY", "start", item_id=item["item_id"], message=f"eval_method={oracle['eval_method']}")])
             er = verify(item, oracle, raw_output, model_version=item_model_version, seed=seed, raw_output_ref=raw_ref, tool_trace=tool_trace, artifacts_dir=artifacts_dir)
+            er["version_bundle"] = build_version_bundle(spec, item_model_version, tool_snapshot_hash, seed)
             validate_or_raise("eval_result.schema.json", er)
 
             append_jsonl(events_path, [_event(run_id, "VERIFY", "ok", item_id=item["item_id"], message=f"verdict={er['verdict']} error_type={er['error_type']}")])
+            er_ref = save_artifact_json(artifacts_dir, f"{item['item_id']}_a2_eval_result.json", er)
+            emit_handoff(
+                run_dir=run_dir,
+                run_id=run_id,
+                item_id=item["item_id"],
+                agent_id="A2",
+                stage="VERIFY",
+                status="ok",
+                output_ref=er_ref,
+                version_bundle=version_bundle,
+            )
             if progress_callback:
                 progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
                 progress_callback("progress", stage="VERIFY", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
 
+            release_refs.append({
+                "item_id": item["item_id"],
+                "item_ref": item_ref,
+                "oracle_ref": oracle_ref,
+                "qa_ref": report_ref,
+                "eval_ref": er_ref,
+            })
             released_items.append(item)
             released_oracles.append(oracle)
             eval_results.append(er)
@@ -263,22 +367,70 @@ def run_batch(
 
     # DIAGNOSE
     append_jsonl(events_path, [_event(run_id, "DIAGNOSE", "start", message="batch diagnosis")])
-    action_plans = diagnose(eval_results)
-    append_jsonl(events_path, [_event(run_id, "DIAGNOSE", "ok", message=f"plans={len(action_plans)}")])
+    clusters, action_plans = diagnose(eval_results)
+    append_jsonl(events_path, [_event(run_id, "DIAGNOSE", "ok", message=f"clusters={len(clusters)} plans={len(action_plans)}")])
+    clusters_ref = save_artifact_json(artifacts_dir, "batch_a3_clusters.json", clusters)
+    action_plans_ref = save_artifact_json(artifacts_dir, "batch_a3_action_plans.json", action_plans)
+    emit_handoff(
+        run_dir=run_dir,
+        run_id=run_id,
+        item_id="",
+        agent_id="A3",
+        stage="DIAGNOSE",
+        status="ok",
+        output_ref=action_plans_ref,
+        version_bundle=version_bundle,
+    )
 
-    # Data production backlog (提出数据生产策略)
-    data_requests = produce_data_requests(eval_results)
+    # Data production backlog (A6 consumes clusters, not raw eval_results)
+    data_requests = produce_data_requests(clusters, eval_results)
+    data_requests_ref = save_artifact_json(artifacts_dir, "batch_a6_data_requests.json", data_requests)
+    emit_handoff(
+        run_dir=run_dir,
+        run_id=run_id,
+        item_id="",
+        agent_id="A6",
+        stage="PRODUCE_DATA_REQUESTS",
+        status="ok",
+        output_ref=data_requests_ref,
+        version_bundle=version_bundle,
+    )
 
     # PACKAGE
+    release_manifest = [
+        {
+            "item_id": refs["item_id"],
+            "item_ref": refs["item_ref"],
+            "oracle_ref": refs["oracle_ref"],
+            "qa_ref": refs["qa_ref"],
+            "eval_ref": refs["eval_ref"],
+            "version_bundle": build_version_bundle(spec, eval_results[i]["model_version"], tool_snapshot_hash, seed),
+            "released_at": "",  # set at write time in package_run
+        }
+        for i, refs in enumerate(release_refs)
+    ]
     append_jsonl(events_path, [_event(run_id, "PACKAGE", "start")])
     package_run(
-        run_dir, spec, released_items, released_oracles, eval_results, action_plans,
+        run_dir, spec, released_items, released_oracles, eval_results, clusters, action_plans,
         attempted_total=attempted_total,
         item_abort_total=item_abort_total,
         latency_ms_list=latency_ms_list,
         data_requests=data_requests,
+        release_manifest=release_manifest,
     )
     append_jsonl(events_path, [_event(run_id, "PACKAGE", "ok", message="packaged")])
+    run_summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+    package_ref = save_artifact_json(artifacts_dir, "batch_a5_run_summary.json", run_summary)
+    emit_handoff(
+        run_dir=run_dir,
+        run_id=run_id,
+        item_id="",
+        agent_id="A5",
+        stage="PACKAGE",
+        status="ok",
+        output_ref=package_ref,
+        version_bundle=version_bundle,
+    )
 
     run_record = {
         "run_id": run_id,

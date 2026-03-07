@@ -71,28 +71,40 @@ def get_item_result(project_root: Path, run_id: str, item_id: str) -> Dict[str, 
 
 def list_failure_clusters(project_root: Path, run_id: str) -> Dict[str, Any]:
     """
-    Load action_plans (failure clusters) from the run.
-    Returns dict with key "clusters" (list of action plan dicts).
+    Load failure clusters (analytical) from the run. Prefers clusters.jsonl; falls back to action_plans.jsonl.
+    Returns dict with key "clusters" (list of failure_cluster or action_plan dicts).
     """
     run_dir = _run_dir(project_root, run_id)
-    path = run_dir / "action_plans.jsonl"
-    clusters = read_jsonl(path)
-    return {"clusters": clusters, "run_id": run_id}
+    clusters_path = run_dir / "clusters.jsonl"
+    if clusters_path.exists():
+        clusters = read_jsonl(clusters_path)
+        return {"clusters": clusters, "run_id": run_id}
+    action_plans_path = run_dir / "action_plans.jsonl"
+    if action_plans_path.exists():
+        clusters = read_jsonl(action_plans_path)
+        return {"clusters": clusters, "run_id": run_id}
+    return {"clusters": [], "run_id": run_id}
 
 
 def generate_data_requests(project_root: Path, run_id: str) -> Dict[str, Any]:
     """
-    Load eval_results from run and produce data_requests (same as batch diagnosis pipeline).
+    Load clusters and eval_results from run and produce data_requests (same as batch pipeline).
     Returns dict with "data_requests" list.
     """
     from ..agents.a6_data_producer import produce_data_requests
 
     run_dir = _run_dir(project_root, run_id)
-    path = run_dir / "eval_results.jsonl"
-    if not path.exists():
+    eval_path = run_dir / "eval_results.jsonl"
+    clusters_path = run_dir / "clusters.jsonl"
+    if not eval_path.exists():
         return {"data_requests": [], "run_id": run_id}
-    eval_results = read_jsonl(path)
-    requests = produce_data_requests(eval_results)
+    eval_results = read_jsonl(eval_path)
+    if clusters_path.exists():
+        clusters = read_jsonl(clusters_path)
+    else:
+        from ..agents.a3_diagnoser import diagnose
+        clusters, _ = diagnose(eval_results)
+    requests = produce_data_requests(clusters, eval_results)
     return {"data_requests": requests, "run_id": run_id}
 
 
@@ -101,6 +113,7 @@ RUN_ROOT_ALLOWLIST = frozenset({
     "eval_results.jsonl",
     "run_summary.json",
     "run_record.json",
+    "clusters.jsonl",
     "action_plans.jsonl",
     "released_items.jsonl",
     "released_oracles.jsonl",

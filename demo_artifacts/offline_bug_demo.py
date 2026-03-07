@@ -41,8 +41,8 @@ result = verify(
 )
 
 eval_results = [result]
-plans = diagnose(eval_results)
-data_requests = produce_data_requests(eval_results)
+clusters, plans = diagnose(eval_results)
+data_requests = produce_data_requests(clusters, eval_results)
 
 summary = {
     "phase": "offline_bugged",

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent_handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "item_id",
+    "agent_id",
+    "stage",
+    "status",
+    "created_at",
+    "output_ref",
+    "version_bundle"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "item_id": { "type": "string" },
+    "agent_id": {
+      "type": "string",
+      "enum": ["A0", "A1", "A1b", "A2", "A3", "A4", "A5", "A6"]
+    },
+    "stage": { "type": "string" },
+    "status": { "type": "string", "enum": ["start", "ok", "fail"] },
+    "failure_code": { "type": "string" },
+    "message": { "type": "string" },
+    "input_refs": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "output_ref": { "type": "object" },
+    "version_bundle": { "$ref": "version_bundle.schema.json" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

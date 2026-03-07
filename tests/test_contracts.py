@@ -268,12 +268,21 @@ def test_diagnoser_clusters_by_error_type_evidence_code_task_type_eval_method():
             "eval_method": "trajectory_check",
         },
     ]
-    plans = diagnose(eval_results)
+    clusters, plans = diagnose(eval_results)
     failure_plans = [p for p in plans if p["cluster_id"] != "PASS"]
+    failure_clusters = [c for c in clusters if c["cluster_id"] != "PASS"]
     assert len(failure_plans) == 2
+    assert len(failure_clusters) == 2
     cluster_ids = {p["cluster_id"] for p in failure_plans}
     assert "EXACT_MATCH_FAILED/EXACT_MATCH_FAILED|json_extract_email|exact_match" in cluster_ids
     assert f"TRAJECTORY_CHECK_FAILED/{TOOL_BINDING_MISMATCH}|trajectory_email_then_answer|trajectory_check" in cluster_ids
+    # Analytical cluster shape: cluster_id, error_type, item_ids, count, hypothesis, owner, recommended_actions
+    for c in failure_clusters:
+        assert "item_ids" in c
+        assert "hypothesis" in c
+        assert "owner" in c
+        assert "recommended_actions" in c
+        assert isinstance(c["recommended_actions"], list)
     # Operational shape: root_cause_hypothesis, recommended_owner, priority, estimated_blast_radius, top_examples, next_action
     for p in failure_plans:
         assert "root_cause_hypothesis" in p
@@ -304,7 +313,7 @@ def test_diagnoser_heuristics_unknown_checker_unsupported_eval_to_eval():
         {"item_id": "u1", "verdict": "fail", "error_type": "EVAL_METHOD_UNSUPPORTED", "evidence": [{"code": "UNKNOWN_CHECKER", "message": "x"}], "task_type": "json_math_add", "eval_method": "programmatic_check"},
         {"item_id": "u2", "verdict": "fail", "error_type": "EVAL_METHOD_UNSUPPORTED", "evidence": [{"code": "UNSUPPORTED_EVAL_METHOD", "message": "y"}], "task_type": "json_extract_email", "eval_method": "unit_test"},
     ]
-    plans = diagnose(eval_results)
+    clusters, plans = diagnose(eval_results)
     failure_plans = [p for p in plans if p["cluster_id"] != "PASS"]
     assert len(failure_plans) >= 1
     for p in failure_plans:
@@ -317,7 +326,7 @@ def test_diagnoser_heuristics_tool_args_to_tooling():
     eval_results = [
         {"item_id": "a1", "verdict": "fail", "error_type": "TRAJECTORY_CHECK_FAILED", "evidence": [{"code": TOOL_ARGS_SCHEMA_FAILED, "message": "arg_schema failed"}], "task_type": "trajectory_email_then_answer", "eval_method": "trajectory_check"},
     ]
-    plans = diagnose(eval_results)
+    clusters, plans = diagnose(eval_results)
     failure_plans = [p for p in plans if p["cluster_id"] != "PASS"]
     assert len(failure_plans) == 1
     assert failure_plans[0]["recommended_owner"] == "tooling"
@@ -327,7 +336,9 @@ def test_diagnoser_action_plans_validate_against_schema():
     eval_results = [
         {"item_id": "v1", "verdict": "fail", "error_type": "EXACT_MATCH_FAILED", "evidence": [{"code": "EXACT_MATCH_FAILED"}], "task_type": "json_extract_email", "eval_method": "exact_match"},
     ]
-    plans = diagnose(eval_results)
+    clusters, plans = diagnose(eval_results)
+    for c in clusters:
+        validate_or_raise("failure_cluster.schema.json", c)
     for ap in plans:
         validate_or_raise("action_plan.schema.json", ap)
 
@@ -346,7 +357,8 @@ def test_old_style_evidence_without_code_still_works_through_fallback():
             "eval_method": "trajectory_check",
         },
     ]
-    requests = produce_data_requests(eval_results)
+    clusters, _ = diagnose(eval_results)
+    requests = produce_data_requests(clusters, eval_results)
     assert len(requests) >= 1
     # Fallback should map to TOOL_RESULT_IGNORED_OR_HALLUCINATION-style request
     issue_types = [r["issue_type"] for r in requests]
@@ -364,7 +376,8 @@ def test_old_style_evidence_arg_schema_fallback():
             "eval_method": "trajectory_check",
         },
     ]
-    requests = produce_data_requests(eval_results)
+    clusters, _ = diagnose(eval_results)
+    requests = produce_data_requests(clusters, eval_results)
     assert len(requests) >= 1
     assert any(r["issue_type"] == "TOOL_ARGS_BAD" for r in requests)
 

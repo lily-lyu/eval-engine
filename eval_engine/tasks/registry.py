@@ -10,6 +10,7 @@ from ..agents.a1_item_generator import (
     _make_trajectory_email_item,
     _make_structured_extraction_item,
     _make_classify_canonical_item,
+    _make_factual_grounded_qa_item,
 )
 from ..agents.a1b_oracle_builder import (
     build_add_oracle,
@@ -18,6 +19,7 @@ from ..agents.a1b_oracle_builder import (
     build_trajectory_oracle,
     build_structured_extraction_oracle,
     build_classify_canonical_oracle,
+    build_factual_grounded_qa_oracle,
 )
 from .mock_suts import (
     solve_add,
@@ -26,6 +28,7 @@ from .mock_suts import (
     solve_trajectory_email,
     solve_structured_extraction,
     solve_classify_canonical,
+    solve_factual_grounded_qa,
 )
 
 
@@ -88,6 +91,13 @@ TASK_REGISTRY: Dict[str, TaskDef] = {
         mock_sut=solve_classify_canonical,
         verifier_plan="programmatic_check",
         checker_name="classification_canonical_v1",
+    ),
+    "factual_grounded_qa": TaskDef(
+        generator=_make_factual_grounded_qa_item,
+        oracle_builder=build_factual_grounded_qa_oracle,
+        mock_sut=solve_factual_grounded_qa,
+        verifier_plan="exact_match",
+        checker_name=None,
     ),
 }
 

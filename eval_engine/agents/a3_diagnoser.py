@@ -153,22 +153,24 @@ def _root_cause_and_owner(
     )
 
 
-def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def diagnose(eval_results: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Cluster failures by (error_type, evidence_code, task_type, eval_method) and emit
-    operational action plans: cluster_id, root_cause_hypothesis, recommended_owner,
-    priority, estimated_blast_radius, top_examples, next_action.
+    Cluster failures by (error_type, evidence_code, task_type, eval_method).
+    Returns (clusters, action_plans):
+    - clusters: analytical failure_cluster objects (cluster_id, error_type, item_ids, count, hypothesis, owner, recommended_actions).
+    - action_plans: operational follow-up (summary, priority, top_examples, next_action, etc.).
     """
-    clusters = defaultdict(list)
+    key_to_group: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = defaultdict(list)
     for r in eval_results:
         key = _cluster_key(r)
-        clusters[key].append(r)
+        key_to_group[key].append(r)
 
     total_evaluated = len(eval_results)
+    cluster_list: List[Dict[str, Any]] = []
     plans: List[Dict[str, Any]] = []
 
     failure_items = sorted(
-        [(k, v) for k, v in clusters.items() if (k[0] or "PASS") != "PASS"],
+        [(k, v) for k, v in key_to_group.items() if (k[0] or "PASS") != "PASS"],
         key=lambda kv: len(kv[1]),
         reverse=True,
     )
@@ -194,7 +196,23 @@ def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             for x in group[:5]
         ]
         priority = 1 if blast_tier == "high" else (2 if blast_tier == "medium" else 3)
+        item_ids = [x["item_id"] for x in group]
 
+        # Analytical cluster object (failure_cluster.schema.json)
+        cluster_list.append({
+            "cluster_id": cluster_id,
+            "error_type": error_type,
+            "item_ids": item_ids,
+            "count": count,
+            "hypothesis": root_cause,
+            "owner": recommended_owner,
+            "recommended_actions": [next_action],
+            "task_type": task_type or "",
+            "evidence_code": code or "",
+            "eval_method": eval_method or "",
+        })
+
+        # Operational action plan (action_plan.schema.json)
         plans.append({
             "cluster_id": cluster_id,
             "summary": f"Cluster '{cluster_id}' with {count} failures (sample item_ids: {[e['item_id'] for e in top_examples]})",
@@ -207,7 +225,21 @@ def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "count": count,
         })
 
-    if not plans:
+    if not cluster_list and not plans:
+        cluster_list.append({
+            "cluster_id": "PASS",
+            "error_type": "",
+            "item_ids": [],
+            "count": 0,
+            "hypothesis": "No failures in this run.",
+            "owner": "eval",
+            "recommended_actions": [
+                "Add harder targets, more domains, and trajectory_check tasks; run larger batch and track metrics.",
+            ],
+            "task_type": "",
+            "evidence_code": "",
+            "eval_method": "",
+        })
         plans.append({
             "cluster_id": "PASS",
             "summary": "All items passed in this run; expand coverage and difficulty gradually.",
@@ -220,4 +252,4 @@ def diagnose(eval_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "count": 0,
         })
 
-    return plans
+    return cluster_list, plans

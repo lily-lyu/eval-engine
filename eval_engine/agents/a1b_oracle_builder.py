@@ -4,6 +4,15 @@ from typing import Any, Dict, List, Optional
 
 from ..core.timeutil import now_iso
 
+# Deterministic methods first; schema_check before rubric_judge. unit_test omitted until implemented end-to-end.
+METHOD_ORDER = [
+    "programmatic_check",
+    "exact_match",
+    "trajectory_check",
+    "schema_check",
+    "rubric_judge",
+]
+
 # Must match SENTIMENT_TEMPLATES in a1_item_generator and tasks.mock_suts.SENTIMENT_MAPPING
 SENTIMENT_MAPPING = {
     "I love this product. It works perfectly!": "positive",
@@ -44,6 +53,87 @@ SENTIMENT_MAPPING = {
     "Rubbish. Would give zero stars if possible.": "negative",
     "Failed to work. Complete junk.": "negative",
 }
+
+
+def _can_programmatically_check(item: Dict[str, Any]) -> bool:
+    from ..tasks.registry import get_task_registry
+
+    task_type = item.get("task_type", "")
+    registry = get_task_registry()
+    return task_type in registry and registry[task_type].verifier_plan == "programmatic_check"
+
+
+def _can_schema_check(item: Dict[str, Any]) -> bool:
+    return True
+
+
+def _can_exact_match(item: Dict[str, Any]) -> bool:
+    from ..tasks.registry import get_task_registry
+
+    task_type = item.get("task_type", "")
+    registry = get_task_registry()
+    return task_type in registry and registry[task_type].verifier_plan == "exact_match"
+
+
+def _can_trajectory_check(item: Dict[str, Any]) -> bool:
+    from ..tasks.registry import get_task_registry
+
+    task_type = item.get("task_type", "")
+    registry = get_task_registry()
+    return task_type in registry and registry[task_type].verifier_plan == "trajectory_check"
+
+
+def _explain_choice(item: Dict[str, Any], selected: str) -> str:
+    """Short rationale for selecting this eval method."""
+    reasons = {
+        "programmatic_check": "Deterministic programmatic checker available; preferred over exact_match.",
+        "schema_check": "No deterministic checker; validate output schema only.",
+        "exact_match": "Deterministic expected value; exact_match suffices.",
+        "trajectory_check": "Task requires tool-use trajectory; trajectory_check enforces sequence and bindings.",
+        "rubric_judge": "No deterministic method applicable; fallback to rubric_judge with evidence_requirements.",
+    }
+    return reasons.get(selected, f"Selected {selected}.")
+
+
+def _explain_rejections(
+    item: Dict[str, Any], candidates: List[str], selected: str
+) -> List[Dict[str, Any]]:
+    """For each candidate we did not select, why we preferred the selected method."""
+    rejected = [m for m in candidates if m != selected]
+    return [
+        {"method": m, "reason": f"Prefer {selected} (higher priority in method order)."}
+        for m in rejected
+    ]
+
+
+def select_eval_method(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Select eval method from item capabilities; deterministic first, rubric_judge last."""
+    candidates: List[str] = []
+    if _can_programmatically_check(item):
+        candidates.append("programmatic_check")
+    if _can_schema_check(item):
+        candidates.append("schema_check")
+    if _can_exact_match(item):
+        candidates.append("exact_match")
+    if _can_trajectory_check(item):
+        candidates.append("trajectory_check")
+    candidates.append("rubric_judge")
+
+    # Dedupe and order by METHOD_ORDER; select first
+    seen: set = set()
+    ordered: List[str] = []
+    for m in METHOD_ORDER:
+        if m in candidates and m not in seen:
+            seen.add(m)
+            ordered.append(m)
+    selected = ordered[0] if ordered else "rubric_judge"
+
+    return {
+        "candidate_methods": ordered,
+        "selected_method": selected,
+        "selection_rationale": _explain_choice(item, selected),
+        "rejected_methods": _explain_rejections(item, ordered, selected),
+    }
 
 
 def _leak_check(prompt: str, expected: Any) -> Dict[str, Any]:
@@ -215,18 +305,46 @@ def build_trajectory_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
     from ..tasks.registry import get_task_registry
-    task_type = item["task_type"]
+
+    sel = select_eval_method(item)
+    task_type = item.get("task_type", "")
     registry = get_task_registry()
+
     if task_type in registry:
         task_def = registry[task_type]
         oracle = task_def.oracle_builder(item)
         if getattr(task_def, "checker_name", None) and "checker_name" not in oracle:
             oracle["checker_name"] = task_def.checker_name
-        return oracle
+    else:
+        oracle = _oracle_common(
+            item,
+            None,
+            "schema_check",
+            "Fallback to schema_check.",
+            None,
+        )
+
+    oracle["eval_method"] = sel["selected_method"]
+    oracle["candidate_methods"] = sel["candidate_methods"]
+    oracle["selection_rationale"] = sel["selection_rationale"]
+    oracle["rejected_methods"] = sel["rejected_methods"]
+    return oracle
+
+
+def build_factual_grounded_qa_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Oracle for web_grounded (answer) or image_grounded (description) factual QA."""
+    inp = item["input"]
+    if "context" in inp:
+        expected = {"answer": inp.get("context", "")}
+    elif "image_description" in inp:
+        expected = {"description": inp.get("image_description", "")}
+    else:
+        expected = {"answer": ""}
     return _oracle_common(
         item,
+        expected,
+        "exact_match",
+        "Factual grounded QA: exact_match on answer or description from grounding.",
         None,
-        "schema_check",
-        "Fallback to schema_check.",
-        None,
+        failure_taxonomy=["EXACT_MATCH_FAILED"],
     )

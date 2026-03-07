@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/failure_cluster.schema.json",
+  "title": "failure_cluster",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cluster_id",
+    "error_type",
+    "item_ids",
+    "count",
+    "hypothesis",
+    "owner",
+    "recommended_actions"
+  ],
+  "properties": {
+    "cluster_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "error_type": { "type": "string", "minLength": 0, "maxLength": 128 },
+    "item_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "minItems": 0,
+      "maxItems": 5000
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "hypothesis": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "owner": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "recommended_actions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 },
+      "minItems": 0,
+      "maxItems": 20
+    },
+    "task_type": { "type": "string", "minLength": 0, "maxLength": 128 },
+    "evidence_code": { "type": "string", "minLength": 0, "maxLength": 128 },
+    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 }
+  }
+}

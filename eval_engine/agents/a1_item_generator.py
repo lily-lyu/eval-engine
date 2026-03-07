@@ -1,6 +1,6 @@
 import random
 import string
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..core.timeutil import now_iso
 
@@ -329,7 +329,57 @@ def _make_classify_canonical_item(spec: Dict[str, Any], dataset_spec_version: st
     }
 
 
-def generate_item_from_target(spec: Dict[str, Any], target: Dict[str, Any], dataset_spec_version: str, rng: random.Random) -> Dict[str, Any]:
+def _make_factual_grounded_qa_item(
+    spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random
+) -> Dict[str, Any]:
+    """Minimal synthetic placeholder for factual_grounded_qa (used when source_policy is synthetic)."""
+    context = "The first programmable computer was built in 1941 (Z3 by Konrad Zuse)."
+    input_obj = {"context": context, "question": "When was the first programmable computer built?"}
+    output_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["answer"],
+        "properties": {"answer": {"type": "string"}},
+    }
+    prompt = (
+        "You MUST output valid JSON that matches the output_schema.\n"
+        "Task: Answer the question using only the provided context.\n"
+        f"Context: {context}\n"
+        "Question: When was the first programmable computer built?\n"
+        'Return JSON: {"answer": "..."}\n'
+    )
+    return {
+        "item_id": _rand_id("item", rng),
+        "dataset_spec_version": dataset_spec_version,
+        "domain_tags": domain_tags,
+        "difficulty": difficulty,
+        "task_type": "factual_grounded_qa",
+        "prompt": prompt,
+        "input": input_obj,
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["context", "question"],
+            "properties": {"context": {"type": "string"}, "question": {"type": "string"}},
+        },
+        "output_schema": output_schema,
+        "constraints": {
+            "no_subjective_judgement": True,
+            "safety_notes": "",
+            "locked_fields": ["dataset_spec_version", "domain_tags", "difficulty", "task_type"],
+        },
+        "provenance": {
+            "created_at": now_iso(),
+            "created_by": "A1",
+            "source": "synthetic",
+        },
+    }
+
+
+def _generate_synthetic_item(
+    spec: Dict[str, Any], target: Dict[str, Any], dataset_spec_version: str, rng: random.Random
+) -> Dict[str, Any]:
+    """Template-based generation via task registry (current behavior)."""
     from ..tasks.registry import get_task_registry
 
     task_type = target["task_type"]
@@ -340,3 +390,168 @@ def generate_item_from_target(spec: Dict[str, Any], target: Dict[str, Any], data
     if task_type not in registry:
         raise ValueError(f"Unsupported task_type in target: {task_type}")
     return registry[task_type].generator(spec, dataset_spec_version, difficulty, domain_tags, rng)
+
+
+def _generate_web_grounded_item(
+    spec: Dict[str, Any],
+    target: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    tool_broker: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Generate a factual QA item grounded by web search; uses mock broker if tool_broker is None."""
+    from ..tools.providers.mock_tools import MockToolBroker
+
+    broker = tool_broker if tool_broker is not None else MockToolBroker()
+    difficulty = target["difficulty"]
+    domain_tags = target["domain_tags"]
+    task_type = target.get("task_type", "factual_grounded_qa")
+
+    query = "When was the first programmable computer built?"
+    result = broker.web_search(query)
+    source_refs = [{"url": result.get("url", ""), "title": result.get("title", "")}]
+    tool_calls = [{"tool": "web_search", "query": query}]
+
+    prompt = (
+        "You MUST output valid JSON that matches the output_schema.\n"
+        "Task: Answer the question using only the provided context.\n"
+        f"Context: {result.get('snippet', '')}\n"
+        f"Question: {query}\n"
+        'Return JSON: {"answer": "..."}\n'
+    )
+    input_obj = {
+        "context": result.get("snippet", ""),
+        "question": query,
+        "source_refs": source_refs,
+    }
+    output_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["answer"],
+        "properties": {"answer": {"type": "string"}},
+    }
+
+    item_id = _rand_id("item", rng)
+    return {
+        "item_id": item_id,
+        "dataset_spec_version": dataset_spec_version,
+        "domain_tags": domain_tags,
+        "difficulty": difficulty,
+        "task_type": task_type,
+        "prompt": prompt,
+        "input": input_obj,
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["context", "question"],
+            "properties": {
+                "context": {"type": "string"},
+                "question": {"type": "string"},
+                "source_refs": {"type": "array", "items": {"type": "object"}},
+            },
+        },
+        "output_schema": output_schema,
+        "constraints": {
+            "no_subjective_judgement": True,
+            "safety_notes": "",
+            "locked_fields": ["dataset_spec_version", "domain_tags", "difficulty", "task_type"],
+        },
+        "provenance": {
+            "created_at": now_iso(),
+            "created_by": "A1",
+            "source": "web_grounded",
+            "source_refs": source_refs,
+            "tool_calls": tool_calls,
+        },
+    }
+
+
+def _generate_image_grounded_item(
+    spec: Dict[str, Any],
+    target: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    tool_broker: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Generate an item grounded by image understanding; uses mock broker if tool_broker is None."""
+    from ..tools.providers.mock_tools import MockToolBroker
+
+    broker = tool_broker if tool_broker is not None else MockToolBroker()
+    difficulty = target["difficulty"]
+    domain_tags = target["domain_tags"]
+    task_type = target.get("task_type", "factual_grounded_qa")
+
+    image_ref = {"uri": "mock://image/placeholder", "mime": "image/png"}
+    result = broker.understand_image(image_ref)
+    asset_refs = [image_ref]
+    tool_calls = [{"tool": "understand_image", "image_ref": image_ref}]
+
+    description = result.get("description", "Mock image description")
+    prompt = (
+        "You MUST output valid JSON that matches the output_schema.\n"
+        "Task: Describe what you see in the image (use the provided description as the image content).\n"
+        f"Image description: {description}\n"
+        'Return JSON: {"description": "..."}\n'
+    )
+    input_obj = {"image_description": description, "asset_refs": asset_refs}
+    output_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["description"],
+        "properties": {"description": {"type": "string"}},
+    }
+
+    item_id = _rand_id("item", rng)
+    return {
+        "item_id": item_id,
+        "dataset_spec_version": dataset_spec_version,
+        "domain_tags": domain_tags,
+        "difficulty": difficulty,
+        "task_type": task_type,
+        "prompt": prompt,
+        "input": input_obj,
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["image_description"],
+            "properties": {
+                "image_description": {"type": "string"},
+                "asset_refs": {"type": "array", "items": {"type": "object"}},
+            },
+        },
+        "output_schema": output_schema,
+        "constraints": {
+            "no_subjective_judgement": True,
+            "safety_notes": "",
+            "locked_fields": ["dataset_spec_version", "domain_tags", "difficulty", "task_type"],
+        },
+        "provenance": {
+            "created_at": now_iso(),
+            "created_by": "A1",
+            "source": "image_grounded",
+            "asset_refs": asset_refs,
+            "tool_calls": tool_calls,
+        },
+    }
+
+
+def generate_item_from_target(
+    spec: Dict[str, Any],
+    target: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    tool_broker: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Generate one eval item from a capability target; dispatches by source_policy."""
+    source_policy = target.get("source_policy", "synthetic")
+    if source_policy == "synthetic":
+        return _generate_synthetic_item(spec, target, dataset_spec_version, rng)
+    if source_policy == "web_grounded":
+        return _generate_web_grounded_item(
+            spec, target, dataset_spec_version, rng, tool_broker=tool_broker
+        )
+    if source_policy == "image_grounded":
+        return _generate_image_grounded_item(
+            spec, target, dataset_spec_version, rng, tool_broker=tool_broker
+        )
+    raise ValueError(f"Unsupported source_policy in target: {source_policy}")

@@ -14,7 +14,7 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
 def default_sut_url() -> str:
     return f"{PUBLIC_BASE_URL.rstrip('/')}/sut/run"
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -179,6 +179,93 @@ def api_get_eval_results(
 @app.get("/runs/{run_id}/clusters")
 def api_get_failure_clusters(run_id: str) -> dict[str, Any]:
     return list_failure_clusters(run_id)
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def _read_text(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.get("/runs/{run_id}/items/{item_id}/trace")
+def get_item_trace(run_id: str, item_id: str) -> dict[str, Any]:
+    runs_dir = Path(os.getenv("EVAL_ENGINE_RUNS_DIR", str(Path.cwd() / "runs")))
+    run_dir = runs_dir / run_id
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    items = _read_jsonl(run_dir / "released_items.jsonl")
+    oracles = _read_jsonl(run_dir / "released_oracles.jsonl")
+    results = _read_jsonl(run_dir / "eval_results.jsonl")
+    action_plans = _read_jsonl(run_dir / "action_plans.jsonl")
+    data_requests = _read_jsonl(run_dir / "data_requests.jsonl")
+    events = _read_jsonl(run_dir / "events.jsonl")
+    run_record = _read_json(run_dir / "run_record.json") or {}
+
+    item = next((row for row in items if row.get("item_id") == item_id), None)
+    oracle = next((row for row in oracles if row.get("item_id") == item_id), None)
+    result = next((row for row in results if row.get("item_id") == item_id), None)
+
+    if not item or not oracle or not result:
+        raise HTTPException(status_code=404, detail=f"Trace not found for item: {item_id}")
+
+    related_action_plans = [
+        row for row in action_plans
+        if any(ex.get("item_id") == item_id for ex in row.get("top_examples", []))
+    ]
+    related_data_requests = [
+        row for row in data_requests
+        if item_id in row.get("sample_item_ids", []) or row.get("source_item_id") == item_id
+    ]
+    related_events = [row for row in events if row.get("item_id") == item_id]
+
+    artifacts_dir = run_dir / "artifacts"
+    qa_report = _read_json(artifacts_dir / f"{item_id}_qa_report.json")
+    tool_trace = _read_json(artifacts_dir / f"{item_id}_tool_trace.json")
+    raw_output = _read_text(artifacts_dir / f"{item_id}_raw.txt")
+
+    version_bundle = {
+        "dataset_spec_version": run_record.get("dataset_spec_version"),
+        "model_version": result.get("model_version") or run_record.get("model_version"),
+        "tool_snapshot_hash": run_record.get("tool_snapshot_hash"),
+        "seed": run_record.get("seed"),
+    }
+
+    return {
+        "content": {
+            "run_id": run_id,
+            "item_id": item_id,
+            "item": item,
+            "oracle": oracle,
+            "qa_report": qa_report,
+            "result": result,
+            "action_plans": related_action_plans,
+            "data_requests": related_data_requests,
+            "events": related_events,
+            "raw_output": raw_output,
+            "tool_trace": tool_trace,
+            "version_bundle": version_bundle,
+        }
+    }
 
 
 @app.get("/runs/{run_id}/items/{item_id}")

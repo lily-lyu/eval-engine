@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "version_bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataset_spec_version",
+    "rubric_schema_version",
+    "eval_script_version",
+    "model_version",
+    "tool_snapshot_hash",
+    "seed"
+  ],
+  "properties": {
+    "dataset_spec_version": { "type": "string" },
+    "rubric_schema_version": { "type": "string" },
+    "eval_script_version": { "type": "string" },
+    "model_version": { "type": "string" },
+    "tool_snapshot_hash": { "type": "string" },
+    "seed": { "type": "integer" },
+    "judge_prompt_version": { "type": "string" },
+    "judge_models": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

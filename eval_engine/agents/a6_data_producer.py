@@ -117,24 +117,40 @@ def _from_trajectory_failure(r: Dict, code: Optional[str]) -> Optional[Dict]:
     )
 
 
-def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
-    """Route failures by error_type / evidence.code / task_type into data requests. Dedupe by issue_type."""
-    requests: List[Dict] = []
+def _eval_results_by_item_id(eval_results: List[Dict]) -> Dict[str, Dict]:
+    """Index eval_results by item_id for cluster → representative lookup."""
+    return {r.get("item_id"): r for r in eval_results if r.get("item_id")}
 
-    for r in eval_results:
-        et = r.get("error_type", "")
-        task_type = r.get("task_type", "")
-        code = _evidence_code(r)
+
+def produce_data_requests(clusters: List[Dict], eval_results: List[Dict]) -> List[Dict]:
+    """
+    Route failure clusters into data requests (backlog). Consumes clusters, not raw eval_results.
+    Uses eval_results for representative evidence lookups (e.g. trajectory message fallback). Dedupe by issue_type.
+    """
+    requests: List[Dict] = []
+    er_by_id = _eval_results_by_item_id(eval_results)
+
+    for c in clusters:
+        cluster_id = c.get("cluster_id", "")
+        et = c.get("error_type", "")
+        task_type = c.get("task_type", "") or ""
+        code = c.get("evidence_code") or None
+        if not et or cluster_id == "PASS":
+            continue
+        # Representative eval_result for this cluster (for message-based fallbacks)
+        rep_item_id = (c.get("item_ids") or [None])[0]
+        rep_r = er_by_id.get(rep_item_id, {}) if rep_item_id else {}
 
         if et == "TRAJECTORY_CHECK_FAILED":
-            req = _from_trajectory_failure(r, code)
+            req = _from_trajectory_failure(rep_r, code)
             if req:
+                req = {**req, "cluster_id": cluster_id}
                 requests.append(req)
 
         elif et == "EXACT_MATCH_FAILED":
             requests.append(
                 _make_request(
-                    cluster_id=f"EXACT/{task_type or 'unknown'}",
+                    cluster_id=cluster_id or f"EXACT/{task_type or 'unknown'}",
                     issue_type="LABEL_OR_FIELD_VALUE_WRONG",
                     priority=2,
                     owner_type="data",
@@ -146,7 +162,6 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
 
         elif et == "PROGRAMMATIC_CHECK_FAILED":
             if task_type == "json_extract_structured":
-                # Specialize by evidence_code; keep issue_type STRUCTURED_FIELD_EXTRACTION_BAD
                 if code == "STRUCTURED_FIELD_VALUE_MISMATCH":
                     what = "Collect distractor-heavy value selection examples; paraphrased layouts, reordered fields, and distractor spans."
                     hint = "Vary field order, separators, and distractor spans; grade correct field value under noise."
@@ -161,7 +176,7 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
                     hint = "Vary field order, separators, and distractor spans."
                 requests.append(
                     _make_request(
-                        cluster_id="PROGRAMMATIC/STRUCTURED_EXTRACTION",
+                        cluster_id=cluster_id or "PROGRAMMATIC/STRUCTURED_EXTRACTION",
                         issue_type="STRUCTURED_FIELD_EXTRACTION_BAD",
                         priority=1,
                         owner_type="data",
@@ -173,7 +188,7 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
             elif task_type == "json_classify_canonical":
                 requests.append(
                     _make_request(
-                        cluster_id="PROGRAMMATIC/CANONICAL_CLASSIFICATION",
+                        cluster_id=cluster_id or "PROGRAMMATIC/CANONICAL_CLASSIFICATION",
                         issue_type="CANONICAL_LABEL_MAPPING_BAD",
                         priority=1,
                         owner_type="data",
@@ -185,7 +200,7 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
             else:
                 requests.append(
                     _make_request(
-                        cluster_id="PROGRAMMATIC/RULE_BASED",
+                        cluster_id=cluster_id or "PROGRAMMATIC/RULE_BASED",
                         issue_type="RULE_BASED_OUTPUT_FAILURE",
                         priority=2,
                         owner_type="data",
@@ -198,7 +213,7 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
         elif et in ("MODEL_OUTPUT_NOT_JSON", "MODEL_OUTPUT_SCHEMA_VIOLATION", "SCHEMA_INVALID"):
             requests.append(
                 _make_request(
-                    cluster_id="FORMAT/STRUCTURED_OUTPUT",
+                    cluster_id=cluster_id or "FORMAT/STRUCTURED_OUTPUT",
                     issue_type="STRUCTURED_OUTPUT_FORMAT_BAD",
                     priority=1,
                     owner_type="training",
@@ -211,7 +226,7 @@ def produce_data_requests(eval_results: List[Dict]) -> List[Dict]:
         elif et == "EVAL_METHOD_UNSUPPORTED":
             requests.append(
                 _make_request(
-                    cluster_id="EVAL/INFRA",
+                    cluster_id=cluster_id or "EVAL/INFRA",
                     issue_type="EVAL_INFRA_CONFIGURATION_GAP",
                     priority=1,
                     owner_type="eval",

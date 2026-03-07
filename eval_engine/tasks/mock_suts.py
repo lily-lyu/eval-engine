@@ -81,3 +81,13 @@ def solve_structured_extraction(item: Dict[str, Any]) -> str:
 def solve_classify_canonical(item: Dict[str, Any]) -> str:
     """Return canonical label (lowercase) from sentiment mapping."""
     return solve_sentiment(item)
+
+
+def solve_factual_grounded_qa(item: Dict[str, Any]) -> str:
+    """Grounded QA: expected answer from context (web) or description (image)."""
+    inp = item["input"]
+    if "context" in inp:
+        return json.dumps({"answer": inp.get("context", "")})
+    if "image_description" in inp:
+        return json.dumps({"description": inp.get("image_description", "")})
+    return json.dumps({"answer": ""})

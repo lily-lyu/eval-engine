@@ -1,6 +1,29 @@
 from pathlib import Path
+from typing import Any, Dict, List
 
 from .hashing import sha256_bytes
+
+
+def build_version_bundle(
+    spec: Dict[str, Any],
+    model_version: str,
+    tool_snapshot_hash: str,
+    seed: int,
+    rubric_schema_version: str = "v1",
+    eval_script_version: str = "v1",
+    judge_prompt_version: str = "",
+    judge_models: List[str] | None = None,
+) -> Dict[str, Any]:
+    return {
+        "dataset_spec_version": spec["dataset_spec_version"],
+        "rubric_schema_version": rubric_schema_version,
+        "eval_script_version": eval_script_version,
+        "model_version": model_version,
+        "tool_snapshot_hash": tool_snapshot_hash,
+        "seed": seed,
+        "judge_prompt_version": judge_prompt_version,
+        "judge_models": judge_models or [],
+    }
 
 
 def compute_tool_snapshot_hash(project_root: Path) -> str:
