@@ -205,7 +205,9 @@ export default async function RunDetailPage({
               Mission Control
             </h1>
             <div className="mt-2 text-sm text-neutral-400">
-              {normalizedCurrentRun.dataset_name || "—"} · {normalizedCurrentRun.model_version || "—"}
+              {[normalizedCurrentRun.dataset_name, normalizedCurrentRun.model_version]
+                .filter(Boolean)
+                .join(" · ") || "—"}
             </div>
             <div className="mt-1 font-mono text-xs text-neutral-500">{runId}</div>
           </div>
@@ -300,7 +302,12 @@ export default async function RunDetailPage({
                       Model versions
                     </div>
                     <div className="mt-2 text-sm text-neutral-200">
-                      {(summaryRaw.model_versions ?? [normalizedCurrentRun.model_version]).join(", ")}
+                      {(Array.isArray(summaryRaw.model_versions)
+                        ? summaryRaw.model_versions
+                        : [normalizedCurrentRun.model_version]
+                      )
+                        .filter(Boolean)
+                        .join(", ") || "—"}
                     </div>
                   </div>
 

@@ -129,6 +129,15 @@ export type StageRow = {
   topFailureCode: string | null;
 };
 
+const RUN_LEVEL_STAGES = new Set([
+  "INIT",
+  "PLAN",
+  "DIAGNOSE",
+  "DATA_REQUESTS",
+  "PACKAGE",
+  "END",
+]);
+
 const STAGE_META: Array<{ agent: string; stage: string; label: string }> = [
   { agent: "A0", stage: "INIT", label: "Initialize" },
   { agent: "A0", stage: "PLAN", label: "Plan batch" },
@@ -181,7 +190,21 @@ export function buildStageRows(events: EventRow[], results: ResultRow[]): StageR
     }
   }
 
-  return STAGE_META.map(({ agent, stage, label }) => {
+  const hasDataRequestsEvents = events.some((e) => e.stage === "DATA_REQUESTS");
+
+  const rows: StageRow[] = [];
+  for (const { agent, stage, label } of STAGE_META) {
+    if (stage === "DATA_REQUESTS" && !hasDataRequestsEvents) continue;
+
+    const startCount = events.filter((e) => e.stage === stage && e.status === "start").length;
+    const okCount = okMap.get(stage) ?? 0;
+    const failCount = failMap.get(stage) ?? 0;
+
+    let inputCount = startCount;
+    if (RUN_LEVEL_STAGES.has(stage) && inputCount === 0 && (okCount > 0 || failCount > 0)) {
+      inputCount = 1;
+    }
+
     const durations = durationMap.get(stage) ?? [];
     const avgLatencyMs =
       durations.length > 0
@@ -192,19 +215,18 @@ export function buildStageRows(events: EventRow[], results: ResultRow[]): StageR
       mostCommon(failureCodesMap.get(stage) ?? []) ??
       (stage === "VERIFY" ? mostCommon(results.map((r) => r.error_type).filter(Boolean)) : null);
 
-    const inputCount = events.filter((e) => e.stage === stage && e.status === "start").length;
-
-    return {
+    rows.push({
       agent,
       stage,
       label,
       inputCount,
-      okCount: okMap.get(stage) ?? 0,
-      failCount: failMap.get(stage) ?? 0,
+      okCount,
+      failCount,
       avgLatencyMs,
       topFailureCode,
-    };
-  });
+    });
+  }
+  return rows;
 }
 
 export type ReleaseDecision = {

@@ -28,14 +28,14 @@ export function PipelineStrip({ stages }: { stages: StageRow[] }) {
             <div className="mt-2 text-sm font-medium text-white">{row.label}</div>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-400">
               <span>{row.inputCount} in</span>
-              <span className="text-emerald-400">{row.okCount} ok</span>
+              <span className="text-emerald-400">{row.okCount} completed</span>
               {row.avgLatencyMs != null && (
                 <span>{formatMs(row.avgLatencyMs)}</span>
               )}
             </div>
             {row.topFailureCode && (
               <div className="mt-2 truncate text-xs text-amber-400" title={row.topFailureCode}>
-                {row.topFailureCode}
+                {row.stage === "VERIFY" ? `fail verdict: ${row.topFailureCode}` : row.topFailureCode}
               </div>
             )}
           </div>

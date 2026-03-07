@@ -154,6 +154,7 @@ def run_batch(
                 output_ref=item_ref,
                 version_bundle=version_bundle,
             )
+            append_jsonl(events_path, [_event(run_id, "GENERATE_ITEM", "ok", item_id=item["item_id"], message="item generated")])
             if progress_callback:
                 progress_pct = (idx + 1) / total_slots * 100.0 if total_slots else 0.0
                 progress_callback("progress", stage="GENERATE_ITEM", item_id=item["item_id"], idx=idx + 1, total=total_slots, progress_pct=progress_pct)
@@ -172,6 +173,7 @@ def run_batch(
                 output_ref=oracle_ref,
                 version_bundle=version_bundle,
             )
+            append_jsonl(events_path, [_event(run_id, "BUILD_ORACLE", "ok", item_id=item["item_id"], message="oracle built")])
 
             append_jsonl(events_path, [_event(run_id, "QA_GATE", "start", item_id=item["item_id"])])
             report = qa_check(spec, item, oracle, seen_prompt_hashes, actual_counts=actual_counts, planned_counts=planned_counts)
