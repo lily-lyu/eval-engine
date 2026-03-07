@@ -11,6 +11,6 @@ RUN_ID
 =4.19.0
 node_modules/
 
-web/.next
+web/.next/
 web/.env.local
-.cursor/mcp.json
+.cursor/
