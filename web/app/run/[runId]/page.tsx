@@ -213,9 +213,15 @@ export default async function RunDetailPage({
         </div>
 
         <div className="mb-8 grid gap-4 md:grid-cols-4">
-          <StatCard label="Pass rate" value={formatPassRate(normalizedCurrentRun.pass_rate)} />
-          <StatCard label="Failures" value={String(normalizedCurrentRun.failures_total)} />
-          <StatCard label="Items" value={String(normalizedCurrentRun.items_total)} />
+          <StatCard
+            label="Pass rate"
+            value={formatPassRate(normalizedCurrentRun.pass_rate ?? null)}
+          />
+          <StatCard
+            label="Failures"
+            value={String(normalizedCurrentRun.failures_total ?? 0)}
+          />
+          <StatCard label="Items" value={String(normalizedCurrentRun.items_total ?? 0)} />
           <StatCard
             label="Release gate"
             value={release.gate}
