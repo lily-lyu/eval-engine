@@ -54,7 +54,7 @@ from eval_engine.services.regression_service import (
     RegressionRequest,
     run_regression_service,
 )
-from eval_engine.services.demo_service import run_demo_failure
+from eval_engine.services.demo_service import list_demo_cases, run_demo_failure
 from eval_engine.services.diagnosis_service import list_failure_clusters
 from eval_engine.services.run_view_service import get_run_events, get_eval_results
 
@@ -301,6 +301,16 @@ def api_run_regression(req: RegressionRequestSchema) -> dict[str, Any]:
     return response.to_dict()
 
 
+@app.get("/demo/cases")
+def api_list_demo_cases() -> dict[str, Any]:
+    """Return supported demo case names for the frontend dropdown."""
+    return {"cases": list_demo_cases()}
+
+
 @app.post("/demo/failure")
 def api_run_demo_failure(req: DemoFailureRequest) -> dict[str, Any]:
-    return run_demo_failure(req.case_name, base_sut_url=default_sut_url())
+    """Run a real demo failure batch. Returns 400 if case is unsupported."""
+    try:
+        return run_demo_failure(req.case_name, base_sut_url=default_sut_url())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

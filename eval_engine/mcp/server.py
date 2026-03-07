@@ -147,8 +147,11 @@ def run_regression(
 
 @mcp.tool()
 def run_demo_failure(case_name: str) -> dict[str, Any]:
-    """Run a single guaranteed-failure demo batch (wrong_email or wrong_sentiment). SUT must be started with demo_case support."""
-    return run_demo_failure_service(case_name)
+    """Run a single guaranteed-failure demo batch. Supported cases: wrong_email, wrong_sentiment, wrong_math, traj_arg_bad, traj_binding_mismatch."""
+    try:
+        return run_demo_failure_service(case_name)
+    except ValueError as e:
+        return {"error": {"code": "UNKNOWN_DEMO_CASE", "message": str(e)}}
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

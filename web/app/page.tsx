@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SectionCard, StatCard, StatusBadge } from "@/components/run-primitives";
 import { API_BASE, apiGet, apiPost } from "@/lib/api";
 import {
@@ -24,13 +24,7 @@ type RunCreateResponse = {
   metrics?: Record<string, unknown>;
 };
 
-const DEMO_CASES = [
-  { value: "wrong_email", label: "wrong_email" },
-  { value: "wrong_sentiment", label: "wrong_sentiment" },
-  { value: "wrong_math", label: "wrong_math" },
-  { value: "traj_arg_bad", label: "traj_arg_bad" },
-  { value: "traj_binding_mismatch", label: "traj_binding_mismatch" },
-] as const;
+type DemoCasesResponse = { cases: string[] };
 
 const SMOKE_SPEC = {
   dataset_name: "mcp_smoke",
@@ -109,6 +103,21 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [latestRunId, setLatestRunId] = useState("");
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
+  const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>([
+    { value: "wrong_email", label: "wrong_email" },
+  ]);
+
+  const loadDemoCases = useCallback(async () => {
+    try {
+      const data = await apiGet<DemoCasesResponse>("/demo/cases");
+      if (Array.isArray(data.cases) && data.cases.length > 0) {
+        setDemoCases(data.cases.map((c) => ({ value: c, label: c })));
+        setDemoCase((prev) => (data.cases.includes(prev) ? prev : data.cases[0]));
+      }
+    } catch {
+      // keep default demo cases on failure
+    }
+  }, []);
 
   async function loadRuns() {
     try {
@@ -121,7 +130,8 @@ export default function HomePage() {
 
   useEffect(() => {
     loadRuns();
-  }, []);
+    loadDemoCases();
+  }, [loadDemoCases]);
 
   // Fetch latest failed cluster from most recent run that has failures
   useEffect(() => {
@@ -168,12 +178,26 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiPost<RunCreateResponse>("/demo/failure", {
-        case_name: demoCase,
+      const res = await fetch(`${API_BASE}/demo/failure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ case_name: demoCase }),
+        cache: "no-store",
       });
-      setLatestRunId(res.run_id);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof body.detail === "string" ? body.detail : body.message || res.statusText || "Demo run failed";
+        setError(msg);
+        return;
+      }
+      const runId = body.run_id;
+      if (!runId) {
+        setError("Server did not return a run_id");
+        return;
+      }
+      setLatestRunId(runId);
       await loadRuns();
-      router.push(`/run/${res.run_id}`);
+      router.push(`/run/${runId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run failure demo");
     } finally {
@@ -270,7 +294,7 @@ export default function HomePage() {
                     onChange={(e) => setDemoCase(e.target.value)}
                     className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
                   >
-                    {DEMO_CASES.map(({ value, label }) => (
+                    {demoCases.map(({ value, label }) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
