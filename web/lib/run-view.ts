@@ -208,12 +208,20 @@ export function buildStageRows(events: EventRow[], results: ResultRow[]): StageR
   });
 }
 
+export type ReleaseDecision = {
+  gate: "PASS" | "WATCH" | "BLOCKED";
+  passRateDelta: number | null;
+  recoveredClusters: string[];
+  introducedClusters: string[];
+  summary: string;
+};
+
 export function buildReleaseDecision(args: {
   current: RunSummaryRow;
   currentClusters: ClusterRow[];
   previous?: RunSummaryRow | null;
   previousClusters?: ClusterRow[];
-}) {
+}): ReleaseDecision {
   const { current, currentClusters, previous, previousClusters = [] } = args;
 
   if (!previous) {
