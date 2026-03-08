@@ -95,6 +95,127 @@ def test_api_accepts_planner_mode_and_model():
     assert data["compile_metadata"].get("planner_mode") == "deterministic"
 
 
+def test_compile_brief_endpoint_deterministic():
+    """POST /compile-brief with natural-language brief returns intent_spec and compiled_dataset_spec."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    resp = client.post(
+        "/compile-brief",
+        json={
+            "brief_text": "Evaluate email extraction and trajectory tool use. Around 10 items.",
+            "quota": 10,
+            "planner_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "brief_text" in data
+    assert "intent_spec" in data
+    assert "compiled_plan" in data
+    assert "compiled_dataset_spec" in data
+    assert "compile_metadata" in data
+    intent = data["intent_spec"]
+    assert intent.get("evaluation_goal")
+    assert "capability_focus" in intent and len(intent["capability_focus"]) >= 1
+    spec = data["compiled_dataset_spec"]
+    assert "capability_targets" in spec and len(spec["capability_targets"]) >= 1
+    assert data["compile_metadata"].get("planner_mode") == "deterministic"
+
+
+def test_compile_brief_under_specified_returns_400():
+    """Brief with no inferrable capability returns 400."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    resp = client.post(
+        "/compile-brief",
+        json={"brief_text": "Evaluate something vague and unspecific."},
+    )
+    assert resp.status_code == 400
+    assert "capability" in resp.json().get("detail", "").lower() or "brief" in resp.json().get("detail", "").lower()
+
+
+def test_compile_brief_target_domain_flows_to_spec():
+    """target_domain in request is reflected in intent_spec and compiled_dataset_spec (allowed_domain_tags, capability_targets[].domain_tags)."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    requested_domain = ["extraction", "trajectory"]
+    resp = client.post(
+        "/compile-brief",
+        json={
+            "brief_text": "Evaluate email extraction and trajectory tool use. Around 6 items.",
+            "quota": 6,
+            "planner_mode": "deterministic",
+            "target_domain": requested_domain,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    intent = data["intent_spec"]
+    assert intent.get("target_domain") == requested_domain
+    spec = data["compiled_dataset_spec"]
+    assert spec.get("allowed_domain_tags") == requested_domain
+    targets = spec.get("capability_targets") or []
+    assert len(targets) >= 1
+    for t in targets:
+        assert t.get("domain_tags") == requested_domain
+
+
+def test_run_compiled_batch_uses_exact_compiled_spec():
+    """Run Compiled Batch uses the previously returned compiled_dataset_spec exactly; no recompile from brief.
+    Submits spec_json only (no intent_json); when run record exists, dataset_name must match the compiled spec.
+    """
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    compile_resp = client.post(
+        "/compile-brief",
+        json={
+            "brief_text": "Evaluate email extraction. Around 3 items.",
+            "quota": 3,
+            "planner_mode": "deterministic",
+        },
+    )
+    assert compile_resp.status_code == 200
+    compile_data = compile_resp.json()
+    compiled_spec = compile_data["compiled_dataset_spec"]
+    dataset_name = compiled_spec.get("dataset_name")
+    assert dataset_name, "compiled spec must have dataset_name"
+
+    # Submit run with *only* spec_json (no intent_json) — this is the "Run Compiled Batch" contract
+    run_resp = client.post(
+        "/runs",
+        json={
+            "spec_json": json.dumps(compiled_spec),
+            "quota": 3,
+            "sut": "http",
+            "sut_url": "http://127.0.0.1:9999/sut/run",
+            "sut_timeout": 30,
+            "model_version": "http-sut-local",
+        },
+    )
+    assert run_resp.status_code == 200
+    run_data = run_resp.json()
+    run_id = run_data.get("run_id")
+    assert run_id
+
+    summary_resp = client.get(f"/runs/{run_id}")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    # When the run record exists (run has started and written metadata), it must match the spec we sent
+    if summary.get("dataset_name"):
+        assert summary["dataset_name"] == dataset_name, (
+            "Run must use the exact compiled spec (same dataset_name); "
+            "Run Compiled Batch must not recompile from brief."
+        )
+
+
 def test_planner_status_endpoint_never_exposes_key():
     from fastapi.testclient import TestClient
     from eval_engine.api.app import app

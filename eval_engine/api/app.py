@@ -51,6 +51,7 @@ from eval_engine.services.artifact_service import (
 from eval_engine.services.job_service import get_job_status as get_job_status_service
 from eval_engine.services.run_service import RunBatchRequest, run_batch_service
 from eval_engine.agents.compile_pipeline import compile_intent_to_plan
+from eval_engine.services.brief_compile_service import brief_to_intent_spec
 from eval_engine.services.regression_service import (
     RegressionRequest,
     run_regression_service,
@@ -102,6 +103,54 @@ class CompileRequestSchema(BaseModel):
     planner_temperature: float | None = None
     allow_experimental: bool | None = None
     save_raw_planner_outputs: bool = False
+
+
+class CompileBriefRequestSchema(BaseModel):
+    """Planning-only; sut_url is a run-time concern and is not accepted here."""
+    brief_text: str
+    quota: int | None = None
+    planner_mode: str | None = None
+    planner_model: str | None = None
+    planner_temperature: float | None = None
+    allow_experimental: bool | None = None
+    target_domain: list[str] | None = None
+
+
+@app.post("/compile-brief")
+def api_compile_brief(req: CompileBriefRequestSchema) -> dict[str, Any]:
+    """Compile natural-language brief to intent_spec, then to compiled_plan. Planning only; use /runs with spec_json for execution."""
+    try:
+        intent_spec = brief_to_intent_spec(
+            req.brief_text,
+            quota=req.quota,
+            planner_mode=req.planner_mode,
+            planner_model=req.planner_model,
+            planner_temperature=req.planner_temperature,
+            allow_experimental=bool(req.allow_experimental),
+            target_domain=req.target_domain,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        compiled_plan = compile_intent_to_plan(
+            intent_spec,
+            planner_mode=req.planner_mode,
+            planner_model=req.planner_model,
+            planner_temperature=req.planner_temperature,
+            allow_experimental=req.allow_experimental,
+            save_raw_planner_outputs=False,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    compiled_dataset_spec = compiled_plan.get("compiled_dataset_spec", {})
+    compile_metadata = compiled_plan.get("compile_metadata", {})
+    return _redact_paths({
+        "brief_text": req.brief_text,
+        "intent_spec": intent_spec,
+        "compiled_plan": compiled_plan,
+        "compiled_dataset_spec": compiled_dataset_spec,
+        "compile_metadata": compile_metadata,
+    })
 
 
 @app.post("/compile")
