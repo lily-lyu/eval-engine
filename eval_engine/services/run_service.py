@@ -128,6 +128,7 @@ def run_batch_service(request: RunBatchRequest) -> RunBatchResponse:
             sut_url=request.sut_url,
             sut_timeout=request.sut_timeout,
             progress_callback=progress_callback,
+            prompt_blueprints=compiled_plan["prompt_blueprints"] if compiled_plan else None,
         )
         update_job(project_root, job_id, status="completed", progress_pct=100.0, current_stage="END", current_item=None)
     except Exception as e:

@@ -20,7 +20,12 @@ from ..core.failure_codes import (
     SUBJECTIVE_TASK,
     UNVERIFIABLE_OUTPUT,
 )
-from ..core.hashing import normalize_prompt, sha256_json
+from ..core.hashing import (
+    compute_dedup_fingerprint,
+    compute_dedup_fingerprint_inputs,
+    normalize_prompt,
+    sha256_json,
+)
 from ..core.timeutil import now_iso
 from ..core.schema import validate_or_raise
 
@@ -235,10 +240,31 @@ def _run_stat_gate(
     planned_counts: Dict[Tuple[str, str, str], int],
 ) -> Tuple[Dict[str, Any], bool]:
     """Returns (gate_result, should_add_hash). If duplicate, don't add hash."""
-    norm = normalize_prompt(item["prompt"])
-    h = sha256_json({"prompt": norm, "task_type": item["task_type"], "difficulty": item["difficulty"]})
+    h, fingerprint_inputs = compute_dedup_fingerprint(item, include_structural=True)
     if h in seen_prompt_hashes:
-        return _gate_result("stat", False, DUPLICATE_ITEM, "duplicate prompt skeleton detected"), False
+        # Build duplicate_metadata for observability (what exactly was duplicated and why)
+        prov = item.get("provenance") or {}
+        norm_preview = (fingerprint_inputs.get("prompt") or "")[:500]
+        duplicate_metadata = {
+            "family_id": prov.get("family_id", ""),
+            "blueprint_id": prov.get("blueprint_id", ""),
+            "materializer_type": item.get("task_type", ""),
+            "task_type": item.get("task_type", ""),
+            "dedup_fingerprint": h,
+            "fingerprint_inputs": fingerprint_inputs,
+            "normalized_prompt_skeleton_preview": norm_preview,
+            "duplicate_match": {
+                "same_prompt_skeleton": True,
+                "same_family": True,
+                "same_blueprint": True,
+                "same_materializer": True,
+            },
+        }
+        return (
+            _gate_result("stat", False, DUPLICATE_ITEM, "duplicate prompt skeleton detected"),
+            False,
+            duplicate_metadata,
+        )
 
     key = (item.get("task_type", ""), item.get("difficulty", ""), item.get("split", ""))
     actual = actual_counts.get(key, 0)
@@ -247,9 +273,9 @@ def _run_stat_gate(
         return _gate_result(
             "stat", False, DISTRIBUTION_MISMATCH,
             f"slot (task_type,difficulty,split) would exceed planned count: actual={actual} planned={planned}",
-        ), False
+        ), False, None
 
-    return _gate_result("stat", True), True
+    return _gate_result("stat", True), True, None
 
 
 def _patch_instructions_for(failure_code: str) -> str:
@@ -320,7 +346,7 @@ def qa_check(
     # Gate 3: Stat (dedup + distribution)
     actual = actual_counts if actual_counts is not None else {}
     planned = planned_counts if planned_counts is not None else {}
-    stat_res, should_add_hash = _run_stat_gate(item, seen_prompt_hashes, actual, planned)
+    stat_res, should_add_hash, duplicate_metadata = _run_stat_gate(item, seen_prompt_hashes, actual, planned)
     gates.append(stat_res)
     if not stat_res["passed"]:
         overall = stat_res["failure_code"]
@@ -335,16 +361,13 @@ def qa_check(
         }
         report["failure_code"] = overall
         report["explanation"] = stat_res["explanation"]
+        if duplicate_metadata is not None and overall == DUPLICATE_ITEM:
+            report["duplicate_metadata"] = duplicate_metadata
         return report
 
     if should_add_hash:
-        seen_prompt_hashes.add(
-            sha256_json({
-                "prompt": normalize_prompt(item["prompt"]),
-                "task_type": item["task_type"],
-                "difficulty": item["difficulty"],
-            })
-        )
+        _, fingerprint_inputs = compute_dedup_fingerprint(item, include_structural=True)
+        seen_prompt_hashes.add(sha256_json(fingerprint_inputs))
 
     report = {
         "item_id": item_id,

@@ -20,6 +20,7 @@ def package_run(
     latency_ms_list: Optional[List[Optional[int]]] = None,
     data_requests: Optional[List[Dict[str, Any]]] = None,
     release_manifest: Optional[List[Dict[str, Any]]] = None,
+    qa_reports_failed: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     # Validate records before packaging
     for it in items:
@@ -85,6 +86,26 @@ def package_run(
             it = r["issue_type"]
             by_issue[it] = by_issue.get(it, 0) + 1
         summary["data_requests_by_issue_type"] = by_issue
+
+    if qa_reports_failed is not None:
+        dup_reports = [r for r in qa_reports_failed if r.get("failure_code") == "DUPLICATE_ITEM"]
+        summary["qa_failed_total"] = len(qa_reports_failed)
+        summary["duplicate_failures_count"] = len(dup_reports)
+        if dup_reports:
+            duplicate_counts_by_family: Dict[str, int] = {}
+            duplicate_counts_by_blueprint: Dict[str, int] = {}
+            duplicate_counts_by_materializer: Dict[str, int] = {}
+            for r in dup_reports:
+                meta = r.get("duplicate_metadata") or {}
+                fid = meta.get("family_id") or "(unknown)"
+                bid = meta.get("blueprint_id") or "(unknown)"
+                mat = meta.get("materializer_type") or "(unknown)"
+                duplicate_counts_by_family[fid] = duplicate_counts_by_family.get(fid, 0) + 1
+                duplicate_counts_by_blueprint[bid] = duplicate_counts_by_blueprint.get(bid, 0) + 1
+                duplicate_counts_by_materializer[mat] = duplicate_counts_by_materializer.get(mat, 0) + 1
+            summary["duplicate_counts_by_family"] = duplicate_counts_by_family
+            summary["duplicate_counts_by_blueprint"] = duplicate_counts_by_blueprint
+            summary["duplicate_counts_by_materializer"] = duplicate_counts_by_materializer
 
     write_json(run_dir / "run_summary.json", summary)
 

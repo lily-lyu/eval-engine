@@ -27,7 +27,7 @@ def assert_locked_fields_unchanged(old_item: Dict[str, Any], new_item: Dict[str,
         if old_item.get(field) != new_item.get(field):
             raise ValueError(f"{TASK_DEFINITION_DRIFT}:{field}")
 
-from .a1_item_generator import generate_item_from_target
+from .a1_item_generator import generate_item_from_target, materialize_target_to_item
 from .a1b_oracle_builder import build_oracle
 from .a4_qa_gate import qa_check
 from .a2_verifier import verify
@@ -74,6 +74,7 @@ def run_batch(
     sut_url: str = "",
     sut_timeout: int = 30,
     progress_callback: Optional[Callable[..., None]] = None,
+    prompt_blueprints: Optional[List[Dict[str, Any]]] = None,
 ) -> Path:
     # Validate spec
     validate_or_raise("dataset_spec.schema.json", spec)
@@ -118,11 +119,15 @@ def run_batch(
     started_at = now_iso()
     seen_prompt_hashes: Set[str] = set()
     model_versions_seen: Set[str] = set()
+    blueprint_by_id: Dict[str, Dict[str, Any]] = {}
+    if prompt_blueprints:
+        blueprint_by_id = {b["blueprint_id"]: b for b in prompt_blueprints if b.get("blueprint_id")}
 
     released_items: List[Dict[str, Any]] = []
     released_oracles: List[Dict[str, Any]] = []
     eval_results: List[Dict[str, Any]] = []
     release_refs: List[Dict[str, Any]] = []
+    failed_qa_reports: List[Dict[str, Any]] = []
 
     max_retries = int(spec["defaults"]["max_retries_per_stage"])
 
@@ -138,7 +143,25 @@ def run_batch(
         previous_failed_item: Optional[Dict[str, Any]] = None
         while True:
             append_jsonl(events_path, [_event(run_id, "GENERATE_ITEM", "start", message=f"attempt={attempt} precheck_regens={precheck_regens}")])
-            item = generate_item_from_target(spec, target, spec["dataset_spec_version"], rng)
+            repetition_index = sum(
+                1 for j in range(idx)
+                if (targets[j].get("blueprint_id") or targets[j].get("target_id"))
+                == (target.get("blueprint_id") or target.get("target_id"))
+            )
+            target_with_repetition = {**target, "repetition_index": repetition_index}
+            blueprint = blueprint_by_id.get(target.get("blueprint_id", "")) if blueprint_by_id else None
+            if blueprint and target.get("blueprint_id"):
+                item = materialize_target_to_item(
+                    spec, target_with_repetition, spec["dataset_spec_version"], rng,
+                    tool_broker=None, blueprint=blueprint,
+                )
+            else:
+                item = generate_item_from_target(spec, target_with_repetition, spec["dataset_spec_version"], rng)
+            if not item.get("provenance"):
+                item["provenance"] = {}
+            item["provenance"]["blueprint_id"] = target.get("blueprint_id", "")
+            item["provenance"]["family_id"] = target.get("family_id", "")
+            item["provenance"]["materializer_type"] = item.get("task_type", "")
             if previous_failed_item is not None:
                 assert_locked_fields_unchanged(previous_failed_item, item)
                 previous_failed_item = None
@@ -189,6 +212,7 @@ def run_batch(
 
             if not report["passed"]:
                 qa_failed_total += 1
+                failed_qa_reports.append(report)
                 failure_code = report["failure_code"]
                 append_jsonl(events_path, [_event(
                     run_id,
@@ -425,6 +449,7 @@ def run_batch(
         latency_ms_list=latency_ms_list,
         data_requests=data_requests,
         release_manifest=release_manifest,
+        qa_reports_failed=failed_qa_reports,
     )
     append_jsonl(events_path, [_event(run_id, "PACKAGE", "ok", message="packaged")])
     run_summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))

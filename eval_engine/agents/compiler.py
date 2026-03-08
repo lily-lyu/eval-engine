@@ -37,9 +37,15 @@ def compile_to_plan(
         "max_retries_per_stage": int(defaults.get("max_retries_per_stage", 2)),
     }
 
-    # Build capability_targets from families + judge_specs
+    # Build capability_targets: one per blueprint (not one per family) so slots spread across blueprint variants
     judge_by_family = {j["family_id"]: j for j in judge_specs}
-    blueprint_by_family = {b["family_id"]: b for b in prompt_blueprints}
+    family_by_id = {f["family_id"]: f for f in eval_families}
+    blueprints_by_family: Dict[str, List[Dict[str, Any]]] = {}
+    for b in prompt_blueprints:
+        fid = b.get("family_id", "")
+        if fid not in blueprints_by_family:
+            blueprints_by_family[fid] = []
+        blueprints_by_family[fid].append(b)
 
     capability_targets: List[Dict[str, Any]] = []
     domain_tags = intent_spec.get("target_domain") or ["general"]
@@ -52,21 +58,40 @@ def compile_to_plan(
                 f"for family '{family_id}' is not in task registry."
             )
         judge = judge_by_family.get(family_id, {})
-        blueprint = blueprint_by_family.get(family_id, {})
-
-        target_id = f"t_{family_id.replace('.', '_')}_{fam.get('difficulty', 'easy')}"
-        ct = {
-            "target_id": target_id,
-            "domain_tags": list(domain_tags),
-            "difficulty": fam.get("difficulty", "easy"),
-            "task_type": task_type,
-            "quota_weight": fam.get("slot_weight", 10),
-            "family_id": family_id,
-            "blueprint_id": blueprint.get("blueprint_id", ""),
-            "judge_spec_id": judge.get("judge_spec_id", ""),
-            "materializer_config": fam.get("materializer_config") or {},
-        }
-        capability_targets.append(ct)
+        blueprints = blueprints_by_family.get(family_id, [])
+        if not blueprints:
+            # Fallback: one target per family when no blueprints (e.g. legacy)
+            bid = f"bp_{family_id.replace('.', '_')}_{fam.get('difficulty', 'easy')}"
+            target_id = f"t_{family_id.replace('.', '_')}_{fam.get('difficulty', 'easy')}"
+            capability_targets.append({
+                "target_id": target_id,
+                "domain_tags": list(domain_tags),
+                "difficulty": fam.get("difficulty", "easy"),
+                "task_type": task_type,
+                "quota_weight": fam.get("slot_weight", 10),
+                "family_id": family_id,
+                "blueprint_id": bid,
+                "judge_spec_id": judge.get("judge_spec_id", ""),
+                "materializer_config": fam.get("materializer_config") or {},
+            })
+            continue
+        slot_weight = fam.get("slot_weight", 10)
+        weight_per_bp = max(1, slot_weight // len(blueprints))
+        for bp in blueprints:
+            bid = bp.get("blueprint_id", "")
+            target_id = f"t_{family_id.replace('.', '_')}_{bid.replace('.', '_')}"[:64]
+            ct = {
+                "target_id": target_id,
+                "domain_tags": list(domain_tags),
+                "difficulty": fam.get("difficulty", "easy"),
+                "task_type": task_type,
+                "quota_weight": weight_per_bp,
+                "family_id": family_id,
+                "blueprint_id": bid,
+                "judge_spec_id": judge.get("judge_spec_id", ""),
+                "materializer_config": bp.get("materializer_config") or fam.get("materializer_config") or {},
+            }
+            capability_targets.append(ct)
 
     if not capability_targets:
         raise ValueError(

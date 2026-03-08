@@ -81,7 +81,10 @@
         "tool_calls": {
           "type": "array",
           "items": { "type": "object" }
-        }
+        },
+        "blueprint_id": { "type": "string", "minLength": 0, "maxLength": 64 },
+        "family_id": { "type": "string", "minLength": 0, "maxLength": 64 },
+        "materializer_type": { "type": "string", "minLength": 0, "maxLength": 64 }
       }
     },
 

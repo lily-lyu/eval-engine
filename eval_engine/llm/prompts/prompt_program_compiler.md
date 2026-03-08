@@ -33,6 +33,10 @@ Each prompt_blueprint must conform to (enforced by the engine):
 3. **family_id** in each blueprint must reference an eval_family from the input.
 4. Do not invent materializer types or blueprint types that are not supported by the execution engine.
 
+## Blueprint diversity (broad or hard batches)
+
+When **batch_size** is large or **difficulty_mix** includes hard/expert, produce **multiple distinct blueprints per family** so slots do not all use the same prompt skeleton. For each family, vary blueprints by scenario structure (e.g. single obvious vs multiple candidates vs noisy/decoy vs wrapped content), entity/constraint style, and **materializer_config.scenario_subtype** (e.g. "single", "noisy", "multi", "distractor"). If a family's slot_weight >= 2, produce at least 2 blueprints; if slot_weight >= 4 or hard-heavy batch, at least 3. Each blueprint must have a distinct **blueprint_id** (e.g. bp_extraction_email_easy_v1, bp_extraction_email_easy_v2).
+
 ## Prohibition on silent repair
 
 Do not change the intended evaluation goal or domain. Do not add variation axes or constraints that contradict the intent_spec. If a family has grounding_mode `synthetic`, grounding_recipe must be consistent.

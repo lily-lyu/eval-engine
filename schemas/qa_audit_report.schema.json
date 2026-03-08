@@ -38,6 +38,29 @@
     "failure_code": { "type": "string" },
     "explanation": { "type": "string" },
 
-    "version_bundle": { "$ref": "version_bundle.schema.json" }
+    "version_bundle": { "$ref": "version_bundle.schema.json" },
+
+    "duplicate_metadata": {
+      "type": "object",
+      "description": "Present when overall_failure_code is DUPLICATE_ITEM; explains what was duplicated and why.",
+      "properties": {
+        "family_id": { "type": "string" },
+        "blueprint_id": { "type": "string" },
+        "materializer_type": { "type": "string" },
+        "task_type": { "type": "string" },
+        "dedup_fingerprint": { "type": "string" },
+        "fingerprint_inputs": { "type": "object" },
+        "normalized_prompt_skeleton_preview": { "type": "string" },
+        "duplicate_match": {
+          "type": "object",
+          "properties": {
+            "same_prompt_skeleton": { "type": "boolean" },
+            "same_family": { "type": "boolean" },
+            "same_blueprint": { "type": "boolean" },
+            "same_materializer": { "type": "boolean" }
+          }
+        }
+      }
+    }
   }
 }

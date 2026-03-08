@@ -10,7 +10,18 @@ def _rand_id(prefix: str, rng: random.Random) -> str:
     return f"{prefix}_{suffix}"
 
 
-def _make_add_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
+def _make_add_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
     a = rng.randint(1, 1000)
     b = rng.randint(1, 1000)
 
@@ -57,10 +68,34 @@ def _make_add_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: 
     }
 
 
-def _make_email_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
+def _make_email_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    # Structural variants: single obvious, multiple with one target, noisy with decoys
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    variant_rng = random.Random(seed)
+    variant = variant_rng.randint(0, 2)
     user = "alex" + "".join(rng.choice(string.digits) for _ in range(3))
     email = f"{user}.wu{rng.randint(10,99)}@example.com"
-    text = f"Please contact Alex at {email} for details."
+    if variant == 0:
+        text = f"Please contact Alex at {email} for details."
+        task_line = "Task: Extract the email address from the text.\n"
+    elif variant == 1:
+        other = f"bob{rng.randint(1,99)}@other.com"
+        text = f"Relevant contact: {email}. Ignore {other}."
+        task_line = "Task: Extract the primary/relevant email address from the text.\n"
+    else:
+        text = f"---\nForward to: {email}\n---\nSignature: support@company.com"
+        task_line = "Task: Extract the forwarding email address from the text (not the signature).\n"
 
     input_obj = {"text": text}
     output_schema = {
@@ -72,7 +107,7 @@ def _make_email_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty
 
     prompt = (
         "You MUST output valid JSON that matches the output_schema.\n"
-        "Task: Extract the email address from the text.\n"
+        f"{task_line}"
         f"Input JSON: {input_obj}\n"
         'Return JSON: {"email": "..."}\n'
     )
@@ -145,8 +180,23 @@ SENTIMENT_TEMPLATES = [
     ("Rubbish. Would give zero stars if possible.", "negative"),
     ("Failed to work. Complete junk.", "negative"),
 ]
-def _make_sentiment_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
-    text, _ = rng.choice(SENTIMENT_TEMPLATES)
+def _make_sentiment_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    # Vary template by blueprint + repetition so same family produces different skeletons
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    variant_rng = random.Random(seed)
+    template_index = variant_rng.randint(0, len(SENTIMENT_TEMPLATES) - 1) if SENTIMENT_TEMPLATES else 0
+    text, _ = SENTIMENT_TEMPLATES[template_index] if SENTIMENT_TEMPLATES else ("No content.", "neutral")
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -190,11 +240,29 @@ def _make_sentiment_item(spec: Dict[str, Any], dataset_spec_version: str, diffic
     }
 
 
-def _make_trajectory_email_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
-    """Task: You must call search_email_db tool, then answer with the email."""
+def _make_trajectory_email_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Task: You must call search_email_db tool, then answer with the email. Variants by blueprint+repetition."""
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    var_rng = random.Random(seed)
+    variant = var_rng.randint(0, 2)
     user = "alex" + "".join(rng.choice(string.digits) for _ in range(3))
     email = f"{user}.wu{rng.randint(10,99)}@example.com"
     text = f"Please contact Alex at {email} for details."
+    if variant == 1:
+        text = f"Inbox snippet: ... From: team@co.com. Reply-to: {email}. ..."
+    elif variant == 2:
+        text = f"Thread: [noise] Target contact: {email} [end]"
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -202,11 +270,12 @@ def _make_trajectory_email_item(spec: Dict[str, Any], dataset_spec_version: str,
         "required": ["email"],
         "properties": {"email": {"type": "string"}}
     }
+    step_phrasing = "Steps: 1) Call search_email_db tool. 2) Return JSON: {\"email\": \"...\"}\n" if variant == 0 else "Use search_email_db then return the requested email in JSON.\n"
     prompt = (
         "You MUST call the search_email_db tool first, then output valid JSON that matches the output_schema.\n"
         "Task: Use search_email_db to find the email in the text, then return it.\n"
         f"Input JSON: {input_obj}\n"
-        "Steps: 1) Call search_email_db tool. 2) Return JSON: {\"email\": \"...\"}\n"
+        f"{step_phrasing}"
     )
     return {
         "item_id": _rand_id("item", rng),
@@ -236,11 +305,30 @@ def _make_trajectory_email_item(spec: Dict[str, Any], dataset_spec_version: str,
     }
 
 
-def _make_structured_extraction_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
-    """Extract email + name from text. Uses programmatic_check with structured_extraction_v1."""
+def _make_structured_extraction_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Extract email + name from text. Uses programmatic_check; variants by blueprint+repetition."""
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    var_rng = random.Random(seed)
+    variant = var_rng.randint(0, 2)
     name = "alice" + "".join(rng.choice(string.ascii_lowercase) for _ in range(3))
     email = f"{name}{rng.randint(10, 99)}@example.com"
-    text = f"Contact {name.capitalize()} at {email} for support."
+    if variant == 0:
+        text = f"Contact {name.capitalize()} at {email} for support."
+    elif variant == 1:
+        text = f"Support ticket #123: Requester {name.capitalize()}, email {email}. Please extract."
+    else:
+        text = f"Name: {name.capitalize()}\nEmail: {email}\n(Other: john@example.com is not the target.)"
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -285,9 +373,23 @@ def _make_structured_extraction_item(spec: Dict[str, Any], dataset_spec_version:
     }
 
 
-def _make_classify_canonical_item(spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random) -> Dict[str, Any]:
-    """Classification with canonicalization (e.g. Positive -> positive). Uses programmatic_check classification_canonical_v1."""
-    text, _ = rng.choice(SENTIMENT_TEMPLATES)
+def _make_classify_canonical_item(
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Classification with canonicalization. Vary template by blueprint+repetition."""
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    var_rng = random.Random(seed)
+    idx = var_rng.randint(0, len(SENTIMENT_TEMPLATES) - 1) if SENTIMENT_TEMPLATES else 0
+    text, _ = SENTIMENT_TEMPLATES[idx] if SENTIMENT_TEMPLATES else ("Neutral.", "neutral")
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -330,11 +432,31 @@ def _make_classify_canonical_item(spec: Dict[str, Any], dataset_spec_version: st
 
 
 def _make_factual_grounded_qa_item(
-    spec: Dict[str, Any], dataset_spec_version: str, difficulty: str, domain_tags: List[str], rng: random.Random
+    spec: Dict[str, Any],
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    *,
+    blueprint_id: Optional[str] = None,
+    repetition_index: int = 0,
+    materializer_config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Minimal synthetic placeholder for factual_grounded_qa (used when source_policy is synthetic)."""
-    context = "The first programmable computer was built in 1941 (Z3 by Konrad Zuse)."
-    input_obj = {"context": context, "question": "When was the first programmable computer built?"}
+    """Minimal synthetic placeholder for factual_grounded_qa; variants by blueprint+repetition."""
+    seed = hash(blueprint_id or "default") % (2**32) + repetition_index
+    var_rng = random.Random(seed)
+    variant = var_rng.randint(0, 2)
+    if variant == 0:
+        context = "The first programmable computer was built in 1941 (Z3 by Konrad Zuse)."
+        question = "When was the first programmable computer built?"
+    elif variant == 1:
+        context = "Z3 (1941, Konrad Zuse) was the first programmable computer. ENIAC came later (1945)."
+        question = "Which machine was the first programmable computer?"
+    else:
+        context = "First programmable computer: 1941, Z3, Konrad Zuse. Do not confuse with ENIAC (1945)."
+        question = "In what year was the first programmable computer built?"
+    input_obj = {"context": context, "question": question}
     output_schema = {
         "type": "object",
         "additionalProperties": False,
@@ -345,7 +467,7 @@ def _make_factual_grounded_qa_item(
         "You MUST output valid JSON that matches the output_schema.\n"
         "Task: Answer the question using only the provided context.\n"
         f"Context: {context}\n"
-        "Question: When was the first programmable computer built?\n"
+        f"Question: {question}\n"
         'Return JSON: {"answer": "..."}\n'
     )
     return {
@@ -379,17 +501,24 @@ def _make_factual_grounded_qa_item(
 def _generate_synthetic_item(
     spec: Dict[str, Any], target: Dict[str, Any], dataset_spec_version: str, rng: random.Random
 ) -> Dict[str, Any]:
-    """Template-based generation via task registry (current behavior)."""
+    """Template-based generation via task registry; passes blueprint/repetition for variation."""
     from ..tasks.registry import get_task_registry
 
     task_type = target["task_type"]
     difficulty = target["difficulty"]
     domain_tags = target["domain_tags"]
+    variation_kwargs = {
+        "blueprint_id": target.get("blueprint_id"),
+        "repetition_index": target.get("repetition_index", 0),
+        "materializer_config": target.get("materializer_config") or {},
+    }
 
     registry = get_task_registry()
     if task_type not in registry:
         raise ValueError(f"Unsupported task_type in target: {task_type}")
-    return registry[task_type].generator(spec, dataset_spec_version, difficulty, domain_tags, rng)
+    return registry[task_type].generator(
+        spec, dataset_spec_version, difficulty, domain_tags, rng, **variation_kwargs
+    )
 
 
 def _generate_web_grounded_item(
@@ -571,18 +700,17 @@ def materialize_target_to_item(
 ) -> Dict[str, Any]:
     """
     Generate item from target. If blueprint is provided and target has blueprint_id,
-    use generate_item_from_blueprint; otherwise use generate_item_from_target (current behavior).
+    enrich target with blueprint_id, family_id, materializer_config and call generate_item_from_target
+    so materializers can consume blueprint variation.
     """
     if blueprint is not None and target.get("blueprint_id"):
-        item = generate_item_from_blueprint(
-            spec,
-            blueprint,
-            dataset_spec_version,
-            rng,
-            domain_tags=target.get("domain_tags"),
-            difficulty=target.get("difficulty"),
-            tool_broker=tool_broker,
-        )
+        full_target = {
+            **target,
+            "blueprint_id": blueprint.get("blueprint_id", ""),
+            "family_id": blueprint.get("family_id", ""),
+            "materializer_config": blueprint.get("materializer_config") or {},
+        }
+        item = generate_item_from_target(spec, full_target, dataset_spec_version, rng, tool_broker=tool_broker)
         if target.get("judge_spec_id"):
             item["judge_spec_id"] = target["judge_spec_id"]
         return item

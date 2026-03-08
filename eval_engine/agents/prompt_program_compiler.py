@@ -22,41 +22,62 @@ def _load_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _blueprint_diversity_target(slot_weight: int, intent_spec: Dict[str, Any]) -> int:
+    """Number of distinct blueprints to create for this family. >= 2 when slots allow, >= 3 for large/hard batches."""
+    n = 1
+    if slot_weight >= 2:
+        n = 2
+    if slot_weight >= 4:
+        n = 3
+    difficulty_mix = intent_spec.get("difficulty_mix") or {}
+    if (difficulty_mix.get("hard", 0) or difficulty_mix.get("expert", 0)) and slot_weight >= 2:
+        n = max(n, 3)
+    return n
+
+
 def _compile_blueprints_deterministic(
     eval_families: List[Dict[str, Any]],
     intent_spec: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Current v1 behavior: one blueprint per family."""
+    """One or more blueprints per family; multiple when slot_weight >= 2/4 or hard-heavy batch."""
     blueprints: List[Dict[str, Any]] = []
+    scenario_subtypes = ["default", "noisy", "multi", "distractor", "minimal", "wrapped"]
     for fam in eval_families:
         family_id = fam["family_id"]
         materializer_type = fam.get("materializer_type", family_id)
         slot_weight = fam.get("slot_weight", 10)
         difficulty = fam.get("difficulty", "easy")
+        n_bp = _blueprint_diversity_target(slot_weight, intent_spec)
 
-        blueprint_id = f"bp_{family_id.replace('.', '_')}_{difficulty}"
-        blueprint = {
-            "blueprint_id": blueprint_id,
-            "family_id": family_id,
-            "blueprint_type": materializer_type,
-            "instruction_template": "",
-            "input_schema": {},
-            "output_schema": {},
-            "variation_axes": ["difficulty", "domain"],
-            "grounding_recipe": {"mode": fam.get("grounding_mode", "synthetic")},
-            "constraints": [],
-            "negative_constraints": [],
-            "dedup_fingerprint_fields": ["task_type", "difficulty", "domain_tags"],
-            "materializer_type": materializer_type,
-            "materializer_config": fam.get("materializer_config") or {},
-        }
+        for i in range(n_bp):
+            suffix = f"v{i + 1}" if n_bp > 1 else ""
+            blueprint_id = f"bp_{family_id.replace('.', '_')}_{difficulty}{suffix}".replace(" ", "_")[:64]
+            subtype = scenario_subtypes[i % len(scenario_subtypes)]
+            materializer_config = dict(fam.get("materializer_config") or {})
+            materializer_config["scenario_subtype"] = subtype
 
-        try:
-            validate_or_raise("prompt_blueprint.schema.json", blueprint)
-        except ValueError as e:
-            raise ValueError(f"{BLUEPRINT_SCHEMA_INVALID}: {e}") from e
+            blueprint = {
+                "blueprint_id": blueprint_id,
+                "family_id": family_id,
+                "blueprint_type": materializer_type,
+                "instruction_template": "",
+                "input_schema": {},
+                "output_schema": {},
+                "variation_axes": ["difficulty", "domain"],
+                "grounding_recipe": {"mode": fam.get("grounding_mode", "synthetic")},
+                "constraints": [],
+                "negative_constraints": [],
+                "dedup_fingerprint_fields": ["task_type", "difficulty", "domain_tags", "blueprint_id"],
+                "materializer_type": materializer_type,
+                "materializer_config": materializer_config,
+            }
 
-        blueprints.append(blueprint)
+            try:
+                validate_or_raise("prompt_blueprint.schema.json", blueprint)
+            except ValueError as e:
+                raise ValueError(f"{BLUEPRINT_SCHEMA_INVALID}: {e}") from e
+
+            blueprints.append(blueprint)
 
     return blueprints
 
