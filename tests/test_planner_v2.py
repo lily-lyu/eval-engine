@@ -323,3 +323,148 @@ def test_hybrid_exact_supported_family_id_unchanged():
     assert len(normalized) == 1
     assert normalized[0]["family_id"] == "trajectory.email_lookup"
     assert not any("Normalized family_id" in w for w in warnings)
+
+
+# ---- Judge/blueprint hybrid order + null defaults + API JSON ----
+
+def test_hybrid_judge_planner_normalizes_before_validation(monkeypatch):
+    """Hybrid judge: raw Gemini output with checker_name None and evidence_requirements None normalizes then validates successfully."""
+    monkeypatch.setattr("eval_engine.config.GEMINI_API_KEY", "fake-key")
+    from eval_engine.agents.judge_planner import compile_judge_specs
+
+    def mock_generate(_p, **kwargs):
+        return json.dumps({
+            "judge_specs": [
+                {
+                    "judge_spec_id": "judge_extraction_email",
+                    "family_id": "extraction.email",
+                    "blueprint_id": "bp_extraction_email_easy",
+                    "eval_method": "exact_match",
+                    "checker_name": None,
+                    "checker_config": None,
+                    "evidence_requirements": None,
+                    "expected_shape": {},
+                    "canonicalization_rules": [],
+                    "pass_fail_observables": ["email"],
+                    "adjudication_policy": "strict",
+                    "failure_taxonomy": [],
+                    "method_justification": "Exact match for email.",
+                }
+            ]
+        })
+
+    monkeypatch.setattr("eval_engine.llm.structured.generate", mock_generate)
+    families = [
+        {
+            "family_id": "extraction.email",
+            "family_label": "E",
+            "objective": "Extract email.",
+            "observable_targets": ["email"],
+            "slot_weight": 10,
+            "allowed_eval_methods": ["exact_match", "schema_check"],
+            "materializer_type": "json_extract_email",
+        }
+    ]
+    blueprints = [
+        {"blueprint_id": "bp_extraction_email_easy", "family_id": "extraction.email", "blueprint_type": "json_extract_email"}
+    ]
+    specs = compile_judge_specs(families, blueprints, mode="hybrid")
+    assert len(specs) == 1
+    assert specs[0]["evidence_requirements"] == {}
+    assert specs[0].get("checker_config") == {}
+    assert "checker_name" not in specs[0] or specs[0]["checker_name"]
+
+
+def test_hybrid_blueprint_normalizes_before_validation(monkeypatch):
+    """Hybrid blueprint: parse without per-item validation, then normalize, then validate."""
+    monkeypatch.setattr("eval_engine.config.GEMINI_API_KEY", "fake-key")
+    from eval_engine.agents.prompt_program_compiler import compile_prompt_blueprints
+
+    def mock_generate(_p, **kwargs):
+        return json.dumps({
+            "prompt_blueprints": [
+                {
+                    "blueprint_id": "bp_extraction_email_easy",
+                    "family_id": "extraction.email",
+                    "blueprint_type": "json_extract_email",
+                    "instruction_template": "",
+                    "input_schema": {},
+                    "output_schema": {},
+                    "variation_axes": ["difficulty"],
+                    "grounding_recipe": {"mode": "synthetic"},
+                    "constraints": [],
+                    "negative_constraints": [],
+                    "dedup_fingerprint_fields": [],
+                    "materializer_type": "json_extract_email",
+                    "materializer_config": {},
+                }
+            ]
+        })
+
+    monkeypatch.setattr("eval_engine.llm.structured.generate", mock_generate)
+    families = [
+        {
+            "family_id": "extraction.email",
+            "family_label": "E",
+            "observable_targets": ["email"],
+            "slot_weight": 10,
+            "materializer_type": "json_extract_email",
+            "grounding_mode": "synthetic",
+        }
+    ]
+    intent_spec = {"intent_name": "x", "intent_spec_version": "1.0.0", "evaluation_goal": "E"}
+    blueprints = compile_prompt_blueprints(families, intent_spec, mode="hybrid")
+    assert len(blueprints) == 1
+    assert blueprints[0]["family_id"] == "extraction.email"
+
+
+def test_deterministic_judge_specs_schema_valid():
+    """Deterministic judge path produces schema-valid specs with no invalid None (non-rubric, non-programmatic)."""
+    from eval_engine.agents.judge_planner import _compile_judge_specs_deterministic
+    from eval_engine.core.schema import validate_or_raise
+
+    families = [
+        {
+            "family_id": "extraction.email",
+            "family_label": "E",
+            "objective": "Extract email.",
+            "observable_targets": ["email"],
+            "allowed_eval_methods": ["exact_match", "schema_check"],
+            "slot_weight": 10,
+            "materializer_type": "json_extract_email",
+        }
+    ]
+    blueprints = [{"blueprint_id": "bp_1", "family_id": "extraction.email"}]
+    specs = _compile_judge_specs_deterministic(families, blueprints)
+    assert len(specs) == 1
+    for s in specs:
+        validate_or_raise("judge_spec.schema.json", s)
+        assert s.get("evidence_requirements") is not None
+        assert s.get("checker_config") is not None
+        if "checker_name" in s:
+            assert s["checker_name"] is not None
+
+
+def test_runs_invalid_json_returns_400():
+    """POST /runs with invalid intent_json or spec_json returns 400."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    resp = client.post("/runs", json={"intent_json": "not valid json {"})
+    assert resp.status_code == 400
+    assert "Invalid" in resp.json().get("detail", "")
+
+    resp2 = client.post("/runs", json={"spec_json": "{ broken ]"})
+    assert resp2.status_code == 400
+
+
+def test_compile_invalid_json_returns_400():
+    """POST /compile with invalid intent_json returns 400."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    resp = client.post("/compile", json={"intent_json": "not valid json {"})
+    assert resp.status_code == 400
+    assert "Invalid" in resp.json().get("detail", "")

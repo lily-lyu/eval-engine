@@ -10,7 +10,7 @@ import json
 from ..config import PLANNER_MODE, PLANNER_MODEL, PLANNER_TEMPERATURE, require_gemini_key_if_llm
 from ..core.failure_codes import BLUEPRINT_SCHEMA_INVALID, LLM_BLUEPRINT_UNCOMPILABLE
 from ..core.schema import validate_or_raise
-from ..llm.structured import generate_and_validate
+from ..llm.structured import generate_and_parse_list, generate_and_validate
 
 _PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
 
@@ -116,15 +116,27 @@ def compile_prompt_blueprints(
     template = _load_prompt("prompt_program_compiler")
     payload = {"eval_families": eval_families, "intent_spec": intent_spec}
     prompt = template + "\n\n## Input\n\n```json\n" + json.dumps(payload, indent=2) + "\n```\n\nOutput only the JSON object with key `prompt_blueprints`."
+    model = planner_model or PLANNER_MODEL
+    temperature = planner_temperature if planner_temperature is not None else PLANNER_TEMPERATURE
+
+    if mode == "hybrid":
+        # Order: raw Gemini → parse JSON → normalize → validate (inside _normalize_blueprints_to_families)
+        raw_list = generate_and_parse_list(
+            prompt,
+            parse_list_from_key="prompt_blueprints",
+            model=model,
+            temperature=temperature,
+        )
+        if not isinstance(raw_list, list):
+            raise ValueError(f"{BLUEPRINT_SCHEMA_INVALID}: expected list of prompt_blueprints, got {type(raw_list).__name__}")
+        return _normalize_blueprints_to_families(raw_list, eval_families)
     raw_list = generate_and_validate(
         prompt,
         "prompt_blueprint.schema.json",
-        model=planner_model or PLANNER_MODEL,
-        temperature=planner_temperature if planner_temperature is not None else PLANNER_TEMPERATURE,
+        model=model,
+        temperature=temperature,
         parse_list_from_key="prompt_blueprints",
     )
     if not isinstance(raw_list, list):
         raise ValueError(f"{BLUEPRINT_SCHEMA_INVALID}: expected list of prompt_blueprints, got {type(raw_list).__name__}")
-    if mode == "hybrid":
-        raw_list = _normalize_blueprints_to_families(raw_list, eval_families)
     return raw_list

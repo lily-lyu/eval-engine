@@ -117,6 +117,49 @@ def generate_and_validate(
     )
 
 
+def generate_and_parse_list(
+    prompt: str,
+    *,
+    parse_list_from_key: str,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_retries: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Call Gemini, parse JSON, return the list from the given key without validating items.
+    Use when caller will normalize then validate (e.g. hybrid judge specs).
+    """
+    max_retries = max_retries if max_retries is not None else PLANNER_MAX_RETRIES
+    last_error: ValueError | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            raw = generate(prompt, model=model, temperature=temperature)
+            data = _parse_json(raw)
+            if isinstance(data, dict) and parse_list_from_key:
+                data = data.get(parse_list_from_key)
+            if not isinstance(data, list):
+                raise ValueError(
+                    f"{LLM_RESPONSE_NOT_JSON}: expected list at '{parse_list_from_key}', got {type(data).__name__}"
+                )
+            for i, item in enumerate(data):
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        f"{LLM_RESPONSE_NOT_JSON}: expected list of objects, item at index {i} is {type(item).__name__}"
+                    )
+            return data
+        except ValueError as e:
+            last_error = e
+            if LLM_RESPONSE_NOT_JSON not in str(e):
+                raise
+            if attempt == max_retries:
+                raise ValueError(
+                    f"{LLM_OUTPUT_REPAIR_EXHAUSTED}: could not obtain valid JSON after {max_retries + 1} attempts: {e}"
+                ) from e
+    raise last_error or ValueError(
+        f"{LLM_OUTPUT_REPAIR_EXHAUSTED}: exceeded max_retries={max_retries}"
+    )
+
+
 def generate_object_and_validate(
     prompt: str,
     schema_filename: str,

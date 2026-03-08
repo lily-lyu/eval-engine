@@ -109,6 +109,9 @@ def api_compile(req: CompileRequestSchema) -> dict[str, Any]:
     """Compile intent_spec to compiled_plan (no run). Returns compiled_plan or 400 with failure code."""
     try:
         intent_spec = json.loads(req.intent_json)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    try:
         compiled_plan = compile_intent_to_plan(
             intent_spec,
             planner_mode=req.planner_mode,
@@ -119,10 +122,7 @@ def api_compile(req: CompileRequestSchema) -> dict[str, Any]:
         )
         return _redact_paths(compiled_plan)
     except ValueError as e:
-        msg = str(e)
-        raise HTTPException(status_code=400, detail=msg)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 class RegressionRequestSchema(BaseModel):
@@ -170,7 +170,10 @@ def api_list_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any
 @app.post("/runs")
 def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
     if req.intent_json:
-        intent_spec = json.loads(req.intent_json)
+        try:
+            intent_spec = json.loads(req.intent_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid intent_json: {e}")
         spec = {}  # will be replaced by compiled_dataset_spec in service
         request = RunBatchRequest(
             project_root=get_repo_root(),
@@ -190,7 +193,10 @@ def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
     else:
         if not req.spec_json:
             raise HTTPException(status_code=400, detail="Either spec_json or intent_json is required")
-        spec = json.loads(req.spec_json)
+        try:
+            spec = json.loads(req.spec_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid spec_json: {e}")
         request = RunBatchRequest(
             project_root=get_repo_root(),
             spec=spec,
