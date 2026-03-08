@@ -148,14 +148,14 @@ export default function HomePage() {
   const [latestRunId, setLatestRunId] = useState("");
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
   const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>(QUICK_DEMO_CASES_FALLBACK);
-  const [plannerMode, setPlannerMode] = useState<string>("deterministic");
+  const [plannerMode, setPlannerMode] = useState<string>("hybrid");
   const [plannerModel, setPlannerModel] = useState("gemini-3-flash-preview");
   const [plannerTemperature, setPlannerTemperature] = useState<number | "">("");
   const [showRawPlannerOutputs, setShowRawPlannerOutputs] = useState(false);
   const [plannerStatus, setPlannerStatus] = useState<PlannerStatusResponse | null>(null);
 
   // Planner (brief-first)
-  const [briefText, setBriefText] = useState("");
+  const [briefText, setBriefText] = useState(DEFAULT_BRIEF_PLACEHOLDER);
   const [briefCompileResult, setBriefCompileResult] = useState<CompileBriefResponse | null>(null);
   const [briefCompileLoading, setBriefCompileLoading] = useState(false);
   const [briefCompileError, setBriefCompileError] = useState("");
@@ -405,7 +405,7 @@ export default function HomePage() {
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="mb-8">
-          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500">
+          <div className="text-sm uppercase tracking-[0.2em] text-white">
             规划驱动的评测与故障诊断
           </div>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white">
@@ -525,14 +525,13 @@ export default function HomePage() {
                   <textarea
                     value={briefText}
                     onChange={(e) => setBriefText(e.target.value)}
-                    placeholder={DEFAULT_BRIEF_PLACEHOLDER}
                     className="min-h-[120px] w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm placeholder:text-neutral-600"
                     rows={5}
                   />
                 </div>
                 <div className="flex flex-wrap items-end gap-4 rounded-xl border border-neutral-800/80 bg-neutral-900/40 p-3">
                   <div>
-                    <label className="mb-1 block text-xs text-neutral-500">配额 / Batch 大小</label>
+                    <label className="mb-1 block text-xs text-neutral-500">运行样本数量</label>
                     <input
                       type="number"
                       min={1}
@@ -549,9 +548,7 @@ export default function HomePage() {
                       onChange={(e) => setPlannerMode(e.target.value)}
                       className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm"
                     >
-                      <option value="deterministic">Deterministic</option>
-                      <option value="hybrid">Hybrid</option>
-                      <option value="llm">LLM</option>
+                      <option value="hybrid">LLM + 确定性（混合）</option>
                     </select>
                   </div>
                   <div>
@@ -708,7 +705,7 @@ export default function HomePage() {
                         <p className="mt-1 text-sm text-neutral-300">
                           {(briefCompileResult.compiled_dataset_spec?.capability_targets as unknown[])
                             ?.length ?? 0}{" "}
-                          个 targets · dataset:{" "}
+                          个 capability targets · dataset:{" "}
                           {(briefCompileResult.compiled_dataset_spec?.dataset_name as string) ?? "—"}
                         </p>
                       </div>
@@ -868,18 +865,16 @@ export default function HomePage() {
                         />
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-end gap-3">
                       <div>
-                        <label className="mb-2 block text-sm text-neutral-300">
-                          最大 released items
-                        </label>
+                        <label className="mb-1 block text-xs text-neutral-500">运行样本数量</label>
                         <input
                           type="number"
                           min={1}
                           max={500}
                           value={quota}
                           onChange={(e) => setQuota(Number(e.target.value) || 1)}
-                          className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
+                          className="w-24 rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm"
                         />
                       </div>
                       <button
@@ -906,15 +901,9 @@ export default function HomePage() {
                             .finally(() => setLoading(false));
                         }}
                         disabled={loading}
-                        className="rounded-xl bg-white px-4 py-2 text-black font-medium disabled:opacity-50 inline-flex items-center gap-2"
+                        className="rounded-xl bg-white px-4 py-2 text-black font-medium disabled:opacity-50"
                       >
-                        {loading && (
-                          <span
-                            className="size-4 shrink-0 rounded-full border-2 border-neutral-400 border-t-transparent animate-spin"
-                            aria-hidden
-                          />
-                        )}
-                        {loading ? "正在发起运行..." : "运行 Batch"}
+                        {loading ? "运行中…" : "运行 Batch"}
                       </button>
                     </div>
                   </>
@@ -947,19 +936,6 @@ export default function HomePage() {
                         )}
                         {previewLoading ? "正在生成方案..." : "预览方案"}
                       </button>
-                      <button
-                        onClick={handleRunBatch}
-                        disabled={loading || geminiUnavailable}
-                        className="rounded-xl bg-white px-4 py-2 text-black font-medium disabled:opacity-50 inline-flex items-center gap-2"
-                      >
-                        {loading && (
-                          <span
-                            className="size-4 shrink-0 rounded-full border-2 border-neutral-400 border-t-transparent animate-spin"
-                            aria-hidden
-                          />
-                        )}
-                        {loading ? "正在发起运行..." : "运行 Batch"}
-                      </button>
                       {compileError && <span className="text-sm text-red-400">{compileError}</span>}
                     </div>
                     {compilePreview &&
@@ -982,20 +958,25 @@ export default function HomePage() {
                           </div>
                         );
                       })()}
-                    <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-end gap-3">
                       <div>
-                        <label className="mb-2 block text-sm text-neutral-300">
-                          最大 released items
-                        </label>
+                        <label className="mb-1 block text-xs text-neutral-500">运行样本数量</label>
                         <input
                           type="number"
                           min={1}
                           max={500}
                           value={quota}
                           onChange={(e) => setQuota(Number(e.target.value) || 1)}
-                          className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
+                          className="w-24 rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm"
                         />
                       </div>
+                      <button
+                        onClick={handleRunBatch}
+                        disabled={loading || geminiUnavailable}
+                        className="rounded-xl bg-white px-4 py-2 text-black font-medium disabled:opacity-50"
+                      >
+                        {loading ? "运行中…" : "运行 Batch"}
+                      </button>
                     </div>
                   </>
                 )}

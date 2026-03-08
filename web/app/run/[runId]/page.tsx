@@ -215,7 +215,7 @@ export default async function RunDetailPage({
               ← Back
             </Link>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
-              Mission Control
+              任务控制
             </h1>
             <div className="mt-2 text-sm text-neutral-400">
               {[normalizedCurrentRun.dataset_name, normalizedCurrentRun.model_version]
