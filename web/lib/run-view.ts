@@ -55,6 +55,7 @@ export function getRunStatus(
   blockedPreExecution?: boolean,
 ): RunStatus {
   if (blockedPreExecution) return "BLOCKED";
+  if (run.items_total <= 0) return "FAIL";
   if (run.failures_total === 0 && run.items_total > 0) return "PASS";
   if (run.eval_passed === 0 && run.failures_total > 0) return "FAIL";
   return "PARTIAL";
@@ -244,6 +245,31 @@ export function buildReleaseDecision(args: {
   previousClusters?: ClusterRow[];
 }): ReleaseDecision {
   const { current, currentClusters, previous, previousClusters = [] } = args;
+
+  if (current.items_total <= 0) {
+    return {
+      gate: "BLOCKED",
+      passRateDelta: null,
+      recoveredClusters: [],
+      introducedClusters: currentClusters.map((c) => c.error_type),
+      summary:
+        "No evaluated items were produced in this run. Release decision is not allowed.",
+    };
+  }
+
+  if (current.pass_rate <= 0) {
+    const previousTypes = new Set(previousClusters.map((c) => c.error_type));
+    const currentTypes = new Set(currentClusters.map((c) => c.error_type));
+    const recoveredClusters = [...previousTypes].filter((x) => !currentTypes.has(x));
+    const introducedClusters = [...currentTypes].filter((x) => !previousTypes.has(x));
+    return {
+      gate: "BLOCKED",
+      passRateDelta: previous ? current.pass_rate - previous.pass_rate : null,
+      recoveredClusters: previous ? recoveredClusters : [],
+      introducedClusters: previous ? introducedClusters : currentClusters.map((c) => c.error_type),
+      summary: "This run did not meet the release threshold.",
+    };
+  }
 
   if (!previous) {
     return {
