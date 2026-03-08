@@ -12,6 +12,7 @@ import {
   type EventRow,
   type ResultRow,
   type RunSummaryRow,
+  type StageRow,
 } from "@/lib/run-view";
 
 /** Raw run summary from API (run_summary.json or run_record.json); may lack RunSummaryRow fields. */
@@ -122,6 +123,14 @@ type ClustersResponse = {
   };
 };
 
+type StageMetricsResponse = {
+  content?: {
+    run_id: string;
+    stages: StageRow[];
+  };
+  error?: unknown;
+};
+
 type RunsResponse = {
   runs: RunSummaryRow[];
 };
@@ -146,12 +155,13 @@ export default async function RunDetailPage({
     ? ((sp.tab as Tab) ?? "overview")
     : "overview";
 
-  const [summaryRaw, eventsRes, resultsRes, clustersRes, runsRes] = await Promise.all([
+  const [summaryRaw, eventsRes, resultsRes, clustersRes, runsRes, stageMetricsRes] = await Promise.all([
     apiGet(`/runs/${runId}`) as Promise<RunSummaryRaw>,
     apiGet(`/runs/${runId}/events?limit=500`) as Promise<EventsResponse>,
     apiGet(`/runs/${runId}/results?limit=500`) as Promise<ResultsResponse>,
     apiGet(`/runs/${runId}/clusters`) as Promise<ClustersResponse>,
     apiGet(`/runs?limit=20`) as Promise<RunsResponse>,
+    apiGet(`/runs/${runId}/stage-metrics`) as Promise<StageMetricsResponse>,
   ]);
 
   const events = eventsRes.content?.events ?? [];
@@ -163,7 +173,10 @@ export default async function RunDetailPage({
     events,
     results,
   );
-  const stageRows = buildStageRows(events, results);
+  const stageRows: StageRow[] =
+    Array.isArray(stageMetricsRes.content?.stages)
+      ? stageMetricsRes.content.stages
+      : buildStageRows(events, results);
   const status = getRunStatus(normalizedCurrentRun, blockedPreExecution);
 
   const previousComparableRun =

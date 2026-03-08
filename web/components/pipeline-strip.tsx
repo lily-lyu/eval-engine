@@ -4,40 +4,51 @@ import type { StageRow } from "@/lib/run-view";
 export function PipelineStrip({ stages }: { stages: StageRow[] }) {
   return (
     <div className="flex flex-wrap gap-3">
-      {stages.map((row) => {
-        const hasFailures = row.failCount > 0;
-        const borderCls = hasFailures
+      {stages.map((stage) => {
+        const stageHasFailure = stage.failCount > 0 || Boolean(stage.topFailureCode);
+        const completedTextClass = stageHasFailure ? "text-neutral-200" : "text-emerald-300";
+        const failureTextClass = "text-red-400";
+
+        const failureLabel =
+          stage.failCount > 0
+            ? `failed: ${stage.topFailureCode ?? stage.failCount}`
+            : stage.topFailureCode
+              ? `fail verdict: ${stage.topFailureCode}`
+              : null;
+
+        const borderCls = stageHasFailure
           ? "border-amber-500/40 bg-amber-500/5"
           : "border-neutral-800 bg-neutral-950/70";
+
         return (
           <div
-            key={row.stage}
+            key={stage.stage}
             className={`rounded-2xl border p-4 min-w-[10rem] ${borderCls}`}
-            title={row.topFailureCode ?? undefined}
+            title={stage.topFailureCode ?? undefined}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">
-                {row.agent}
+                {stage.agent}
               </span>
-              {hasFailures && (
+              {stage.failCount > 0 && (
                 <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">
-                  {row.failCount} fail
+                  {stage.failCount} fail
                 </span>
               )}
             </div>
-            <div className="mt-2 text-sm font-medium text-white">{row.label}</div>
+            <div className="mt-2 text-sm font-medium text-white">{stage.label}</div>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-400">
-              <span>{row.inputCount} in</span>
-              <span className="text-emerald-400">{row.okCount} completed</span>
-              {row.avgLatencyMs != null && (
-                <span>{formatMs(row.avgLatencyMs)}</span>
+              <span>{stage.inputCount} in</span>
+              <span className={completedTextClass}>{stage.okCount} completed</span>
+              {stage.avgLatencyMs != null && (
+                <span>{formatMs(stage.avgLatencyMs)}</span>
               )}
             </div>
-            {row.topFailureCode && (
-              <div className="mt-2 truncate text-xs text-amber-400" title={row.topFailureCode}>
-                {row.stage === "VERIFY" ? `fail verdict: ${row.topFailureCode}` : row.topFailureCode}
+            {failureLabel ? (
+              <div className={`mt-3 text-sm ${failureTextClass}`} title={stage.topFailureCode ?? undefined}>
+                {failureLabel}
               </div>
-            )}
+            ) : null}
           </div>
         );
       })}

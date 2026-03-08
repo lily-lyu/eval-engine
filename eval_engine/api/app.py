@@ -56,7 +56,7 @@ from eval_engine.services.regression_service import (
 )
 from eval_engine.services.demo_service import list_demo_cases, run_demo_failure
 from eval_engine.services.diagnosis_service import list_failure_clusters
-from eval_engine.services.run_view_service import get_run_events, get_eval_results
+from eval_engine.services.run_view_service import get_run_events, get_eval_results, get_run_stage_metrics
 
 from eval_engine.api.sut import router as sut_router
 
@@ -179,6 +179,12 @@ def api_get_eval_results(
 @app.get("/runs/{run_id}/clusters")
 def api_get_failure_clusters(run_id: str) -> dict[str, Any]:
     return list_failure_clusters(run_id)
+
+
+@app.get("/runs/{run_id}/stage-metrics")
+def api_get_run_stage_metrics(run_id: str) -> dict[str, Any]:
+    """Pre-aggregated pipeline stage metrics from the full event log (no truncation)."""
+    return get_run_stage_metrics(run_id)
 
 
 def _read_jsonl(path: Path) -> list[dict]:

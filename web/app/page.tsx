@@ -26,6 +26,13 @@ type RunCreateResponse = {
 
 type DemoCasesResponse = { cases: string[] };
 
+// —— Quick: canned demos (case names from API; no spec picker) —————————————
+// QUICK_DEMO_CASES: options for "Failure demo case" dropdown; labels populated from API or fallback.
+const QUICK_DEMO_CASES_FALLBACK = [
+  { value: "wrong_email", label: "wrong_email" },
+];
+
+// —— Advanced: neutral dataset templates for real runs (no demo wording) —————
 const SMOKE_SPEC = {
   dataset_name: "mcp_smoke",
   dataset_spec_version: "1.0.0",
@@ -42,13 +49,13 @@ const SMOKE_SPEC = {
   defaults: { max_prompt_length: 20000, max_retries_per_stage: 2, seed: 42 },
 };
 
-const WRONG_EMAIL_SPEC = {
-  dataset_name: "demo_wrong_email",
+const EMAIL_EXTRACTION_TEMPLATE = {
+  dataset_name: "email_extraction",
   dataset_spec_version: "1.0.0",
   allowed_domain_tags: ["extraction"],
   capability_targets: [
     {
-      target_id: "demo_wrong_email",
+      target_id: "email_extraction_easy",
       domain_tags: ["extraction"],
       difficulty: "easy",
       task_type: "json_extract_email",
@@ -58,13 +65,13 @@ const WRONG_EMAIL_SPEC = {
   defaults: { max_prompt_length: 20000, max_retries_per_stage: 2, seed: 42 },
 };
 
-const TRAJECTORY_ARG_BAD_SPEC = {
-  dataset_name: "demo_trajectory_arg_bad",
+const TRAJECTORY_TEMPLATE = {
+  dataset_name: "trajectory_tool_use",
   dataset_spec_version: "1.0.0",
   allowed_domain_tags: ["trajectory"],
   capability_targets: [
     {
-      target_id: "demo_trajectory",
+      target_id: "trajectory_email_answer",
       domain_tags: ["trajectory"],
       difficulty: "easy",
       task_type: "trajectory_email_then_answer",
@@ -74,11 +81,11 @@ const TRAJECTORY_ARG_BAD_SPEC = {
   defaults: { max_prompt_length: 20000, max_retries_per_stage: 2, seed: 42 },
 };
 
-const SPEC_PRESETS = [
-  { value: "smoke", label: "Smoke test", spec: SMOKE_SPEC },
-  { value: "wrong_email", label: "Wrong email demo", spec: WRONG_EMAIL_SPEC },
-  { value: "trajectory_arg_bad", label: "Trajectory arg bad demo", spec: TRAJECTORY_ARG_BAD_SPEC },
-  { value: "advanced", label: "Advanced (custom JSON)", spec: null },
+const ADVANCED_SPEC_PRESETS = [
+  { value: "smoke_template", label: "Smoke test template", spec: SMOKE_SPEC },
+  { value: "email_template", label: "Email extraction template", spec: EMAIL_EXTRACTION_TEMPLATE },
+  { value: "trajectory_template", label: "Trajectory tool-use template", spec: TRAJECTORY_TEMPLATE },
+  { value: "custom", label: "Custom JSON", spec: null },
 ] as const;
 
 const DEFAULT_SPEC = JSON.stringify(SMOKE_SPEC, null, 2);
@@ -92,9 +99,9 @@ export default function HomePage() {
   const router = useRouter();
   const [runs, setRuns] = useState<RunSummaryRow[]>([]);
   const [specJson, setSpecJson] = useState(DEFAULT_SPEC);
-  const [specPreset, setSpecPreset] = useState<string>("smoke");
+  const [specPreset, setSpecPreset] = useState<string>("smoke_template");
   const [advancedJsonOpen, setAdvancedJsonOpen] = useState(false);
-  const [advancedOptionsOpen, setAdvancedOptionsOpen] = useState(false);
+  const [runtimeOptionsOpen, setRuntimeOptionsOpen] = useState(false);
   const [runSectionMode, setRunSectionMode] = useState<"quick" | "advanced">("quick");
   const [sutUrl, setSutUrl] = useState(`${API_BASE}/sut/run`);
   const [quota, setQuota] = useState(1);
@@ -103,9 +110,7 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [latestRunId, setLatestRunId] = useState("");
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
-  const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>([
-    { value: "wrong_email", label: "wrong_email" },
-  ]);
+  const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>(QUICK_DEMO_CASES_FALLBACK);
 
   const loadDemoCases = useCallback(async () => {
     try {
@@ -287,6 +292,9 @@ export default function HomePage() {
 
             {runSectionMode === "quick" ? (
               <div className="space-y-4">
+                <p className="text-sm text-neutral-400">
+                  One-click canned runs for validating the pipeline and showing failure handling.
+                </p>
                 <div>
                   <label className="mb-2 block text-sm text-neutral-300">Failure demo case</label>
                   <select
@@ -322,42 +330,34 @@ export default function HomePage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setAdvancedOptionsOpen((o) => !o)}
-                    className="text-sm text-neutral-400 underline hover:text-neutral-300"
-                  >
-                    {advancedOptionsOpen ? "▼" : "▶"} Advanced options
-                  </button>
+                <p className="text-sm text-neutral-400">
+                  Configure a real batch run against your SUT using a template or custom dataset JSON.
+                </p>
 
-                  {advancedOptionsOpen && (
-                    <div className="mt-3">
-                      <label className="mb-2 block text-sm text-neutral-300">SUT URL</label>
-                      <input
-                        value={sutUrl}
-                        onChange={(e) => setSutUrl(e.target.value)}
-                        className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
-                        placeholder="http://127.0.0.1:8000/run"
-                      />
-                    </div>
-                  )}
+                <div>
+                  <label className="mb-2 block text-sm text-neutral-300">SUT URL</label>
+                  <input
+                    value={sutUrl}
+                    onChange={(e) => setSutUrl(e.target.value)}
+                    className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
+                    placeholder="http://127.0.0.1:8000/sut/run"
+                  />
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm text-neutral-300">Dataset spec</label>
+                  <label className="mb-2 block text-sm text-neutral-300">Dataset template</label>
                   <select
                     value={specPreset}
                     onChange={(e) => {
                       const v = e.target.value;
                       setSpecPreset(v);
-                      const preset = SPEC_PRESETS.find((p) => p.value === v);
+                      const preset = ADVANCED_SPEC_PRESETS.find((p) => p.value === v);
                       if (preset?.spec) setSpecJson(JSON.stringify(preset.spec, null, 2));
-                      if (v === "advanced") setAdvancedJsonOpen(true);
+                      if (v === "custom") setAdvancedJsonOpen(true);
                     }}
                     className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
                   >
-                    {SPEC_PRESETS.map((p) => (
+                    {ADVANCED_SPEC_PRESETS.map((p) => (
                       <option key={p.value} value={p.value}>
                         {p.label}
                       </option>
@@ -371,39 +371,57 @@ export default function HomePage() {
                     onClick={() => setAdvancedJsonOpen((o) => !o)}
                     className="text-sm text-neutral-400 underline hover:text-neutral-300"
                   >
-                    {advancedJsonOpen ? "▼" : "▶"} Advanced JSON
+                    {advancedJsonOpen ? "▼" : "▶"} Custom JSON
                   </button>
                   {advancedJsonOpen && (
                     <textarea
                       value={specJson}
                       onChange={(e) => {
                         setSpecJson(e.target.value);
-                        setSpecPreset("advanced");
+                        setSpecPreset("custom");
                       }}
                       className="mt-3 h-48 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
                     />
                   )}
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-sm text-neutral-300">Quota</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={quota}
-                    onChange={(e) => setQuota(Number(e.target.value) || 1)}
-                    className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
-                  />
+                <div className="flex flex-wrap items-center gap-4">
+                  <div>
+                    <label className="mb-2 block text-sm text-neutral-300">Quota</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={quota}
+                      onChange={(e) => setQuota(Number(e.target.value) || 1)}
+                      className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <button
+                      onClick={handleRunBatch}
+                      disabled={loading}
+                      className="rounded-xl bg-white px-4 py-2 text-black disabled:opacity-50"
+                    >
+                      {loading ? "Running..." : "Run Batch"}
+                    </button>
+                  </div>
                 </div>
 
-                <button
-                  onClick={handleRunBatch}
-                  disabled={loading}
-                  className="rounded-xl bg-white px-4 py-2 text-black disabled:opacity-50"
-                >
-                  {loading ? "Running..." : "Run Custom Batch"}
-                </button>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setRuntimeOptionsOpen((o) => !o)}
+                    className="text-sm text-neutral-400 underline hover:text-neutral-300"
+                  >
+                    {runtimeOptionsOpen ? "▼" : "▶"} Runtime options
+                  </button>
+                  {runtimeOptionsOpen && (
+                    <div className="mt-3 rounded-xl border border-neutral-800 bg-neutral-950/50 p-3 text-sm text-neutral-500">
+                      Optional runtime settings can be added here (e.g. timeout, env overrides).
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
