@@ -191,7 +191,13 @@ def _oracle_common(
 
 def build_add_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
     inp = item["input"]
-    expected = {"answer": int(inp["a"]) + int(inp["b"])}
+    a, b = int(inp["a"]), int(inp["b"])
+    if "c" in inp:
+        expected = {"answer": a + b + int(inp["c"])}
+        checker_config = {"input_keys": ["a", "b", "c"], "output_key": "answer", "formula": "two_step_sum"}
+    else:
+        expected = {"answer": a + b}
+        checker_config = {"input_keys": ["a", "b"], "output_key": "answer"}
     return _oracle_common(
         item,
         expected,
@@ -199,7 +205,7 @@ def build_add_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
         "Deterministic numeric relation; prefer programmatic_check over exact_match.",
         None,
         checker_name="math_add_v1",
-        checker_config={"input_keys": ["a", "b"], "output_key": "answer"},
+        checker_config=checker_config,
         failure_taxonomy=["PROGRAMMATIC_CHECK_FAILED"],
     )
 

@@ -5,7 +5,7 @@
   "description": "User-facing high-level evaluation intent. Input to the intent planning layer.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["intent_name", "intent_spec_version", "evaluation_goal"],
+  "required": ["evaluation_goal"],
   "properties": {
     "intent_name": { "type": "string", "minLength": 1, "maxLength": 128 },
     "intent_spec_version": { "type": "string", "minLength": 1, "maxLength": 32 },
@@ -59,6 +59,23 @@
       "minItems": 0,
       "maxItems": 32
     },
+    "planner_objective": {
+      "type": "string",
+      "enum": ["balanced", "failure_seeking", "regression", "smoke"],
+      "description": "Planner objective: balanced (default), failure_seeking (bias hard families), regression, smoke."
+    },
+    "difficulty_floor": {
+      "type": "string",
+      "enum": ["easy", "medium", "hard"],
+      "description": "Minimum difficulty tier for planned families."
+    },
+    "hard_family_bias": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0 },
+      "description": "Optional numeric weights by family/risk (e.g. trajectory, grounded_qa, extraction, classification, math)."
+    },
+    "hard_min_fraction": { "type": "number", "minimum": 0, "maximum": 1, "description": "Minimum fraction of slots that must be hard families (trajectory, grounded_qa, extraction.structured)." },
+    "adversarial_variation_required": { "type": "boolean", "description": "When true, prefer failure-prone scenario subtypes in blueprints." },
     "planner_defaults": {
       "type": "object",
       "additionalProperties": false,

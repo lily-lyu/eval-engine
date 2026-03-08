@@ -47,7 +47,10 @@ SENTIMENT_MAPPING = {
 
 def solve_add(item: Dict[str, Any]) -> str:
     inp = item["input"]
-    return json.dumps({"answer": int(inp["a"]) + int(inp["b"])})
+    a, b = int(inp["a"]), int(inp["b"])
+    if "c" in inp:
+        return json.dumps({"answer": a + b + int(inp["c"])})
+    return json.dumps({"answer": a + b})
 
 
 def solve_email(item: Dict[str, Any]) -> str:

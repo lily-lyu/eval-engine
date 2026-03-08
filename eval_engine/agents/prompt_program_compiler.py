@@ -14,6 +14,46 @@ from ..llm.structured import generate_and_parse_list, generate_and_validate
 
 _PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
 
+# Failure-prone scenario_subtypes by family (machine-checkable, oracle-compatible).
+HARD_SCENARIO_SUBTYPES_BY_FAMILY: Dict[str, List[str]] = {
+    "extraction.email": ["distractor", "noisy", "multi", "wrapped"],
+    "extraction.structured": ["distractor", "noisy", "multi_record", "conflicting_fields"],
+    "grounded.qa.factual": ["distractor_context", "near_match", "multi_hopish", "citation_conflict"],
+    "trajectory.email_lookup": ["tool_order_trap", "missing_tool_arg_risk", "distractor_email", "multi_step_dependency"],
+    "classification.sentiment": ["boundary_case", "label_confusion", "negation"],
+    "classification.canonical": ["boundary_case", "label_confusion", "negation"],
+    "math.add": ["carry_chain", "wording_distraction", "multi_step"],
+}
+
+
+def _is_hard_mode(intent_spec: Dict[str, Any], eval_families: List[Dict[str, Any]]) -> bool:
+    """True when planner_objective is failure_seeking, difficulty_floor is hard, or adversarial_variation_required."""
+    if intent_spec.get("adversarial_variation_required"):
+        return True
+    if (intent_spec.get("planner_objective") or "").lower() == "failure_seeking":
+        return True
+    if (intent_spec.get("difficulty_floor") or "").lower() == "hard":
+        return True
+    for f in eval_families:
+        if f.get("risk_tier") == "failure_seeking" or f.get("difficulty") == "hard":
+            return True
+    return False
+
+
+def _scenario_subtypes_for_family(
+    family_id: str,
+    n_bp: int,
+    intent_spec: Dict[str, Any],
+    eval_families: List[Dict[str, Any]],
+) -> List[str]:
+    """Return scenario_subtype list for this family; use hard subtypes when in hard mode."""
+    hard = _is_hard_mode(intent_spec, eval_families)
+    if hard and family_id in HARD_SCENARIO_SUBTYPES_BY_FAMILY:
+        pool = HARD_SCENARIO_SUBTYPES_BY_FAMILY[family_id]
+        return [pool[i % len(pool)] for i in range(n_bp)]
+    default_pool = ["default", "noisy", "multi", "distractor", "minimal", "wrapped"]
+    return [default_pool[i % len(default_pool)] for i in range(n_bp)]
+
 
 def _load_prompt(name: str) -> str:
     path = _PROMPT_DIR / f"{name}.md"
@@ -39,20 +79,20 @@ def _compile_blueprints_deterministic(
     eval_families: List[Dict[str, Any]],
     intent_spec: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """One or more blueprints per family; multiple when slot_weight >= 2/4 or hard-heavy batch."""
+    """One or more blueprints per family; multiple when slot_weight >= 2/4 or hard-heavy batch. Hard mode uses failure-prone scenario_subtypes."""
     blueprints: List[Dict[str, Any]] = []
-    scenario_subtypes = ["default", "noisy", "multi", "distractor", "minimal", "wrapped"]
     for fam in eval_families:
         family_id = fam["family_id"]
         materializer_type = fam.get("materializer_type", family_id)
         slot_weight = fam.get("slot_weight", 10)
         difficulty = fam.get("difficulty", "easy")
         n_bp = _blueprint_diversity_target(slot_weight, intent_spec)
+        subtypes = _scenario_subtypes_for_family(family_id, n_bp, intent_spec, eval_families)
 
         for i in range(n_bp):
             suffix = f"v{i + 1}" if n_bp > 1 else ""
             blueprint_id = f"bp_{family_id.replace('.', '_')}_{difficulty}{suffix}".replace(" ", "_")[:64]
-            subtype = scenario_subtypes[i % len(scenario_subtypes)]
+            subtype = subtypes[i] if i < len(subtypes) else "default"
             materializer_config = dict(fam.get("materializer_config") or {})
             materializer_config["scenario_subtype"] = subtype
 

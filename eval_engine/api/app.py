@@ -175,10 +175,13 @@ def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid intent_json: {e}")
         spec = {}  # will be replaced by compiled_dataset_spec in service
+        # When both planner batch_size and UI quota are set, use the smaller (cap released items)
+        batch_size = intent_spec.get("batch_size") if isinstance(intent_spec.get("batch_size"), int) else None
+        effective_quota = min(req.quota, batch_size) if batch_size is not None else req.quota
         request = RunBatchRequest(
             project_root=get_repo_root(),
             spec=spec,
-            quota=req.quota,
+            quota=effective_quota,
             sut_name=req.sut,
             sut_url=req.sut_url or default_sut_url(),
             sut_timeout=req.sut_timeout,

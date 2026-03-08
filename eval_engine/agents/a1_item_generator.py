@@ -10,6 +10,13 @@ def _rand_id(prefix: str, rng: random.Random) -> str:
     return f"{prefix}_{suffix}"
 
 
+def _scenario_subtype(materializer_config: Optional[Dict[str, Any]]) -> str:
+    """Return scenario_subtype from materializer_config for hard-mode variation."""
+    if not materializer_config:
+        return "default"
+    return (materializer_config.get("scenario_subtype") or "default").lower()
+
+
 def _make_add_item(
     spec: Dict[str, Any],
     dataset_spec_version: str,
@@ -22,9 +29,45 @@ def _make_add_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
+    subtype = _scenario_subtype(materializer_config)
+    if subtype == "carry_chain":
+        a, b = rng.randint(500, 999), rng.randint(500, 999)
+        task_line = "Task: Add the two integers. Watch for carry digits.\n"
+    elif subtype == "multi_step":
+        a, b = rng.randint(1, 100), rng.randint(1, 100)
+        c = rng.randint(1, 50)
+        input_obj = {"a": a, "b": b, "c": c}
+        output_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["answer"],
+            "properties": {"answer": {"type": "integer"}}
+        }
+        prompt = (
+            "You MUST output valid JSON that matches the output_schema.\n"
+            "Task: First add a and b, then add that result to c. Return the final sum.\n"
+            f"Input JSON: {input_obj}\n"
+            'Return JSON: {"answer": (a+b)+c}\n'
+        )
+        return _add_item_common(dataset_spec_version, difficulty, domain_tags, rng, input_obj, output_schema, prompt)
+    elif subtype == "wording_distraction":
+        a, b = rng.randint(1, 100), rng.randint(1, 100)
+        input_obj = {"a": a, "b": b}
+        output_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["answer"],
+            "properties": {"answer": {"type": "integer"}}
+        }
+        prompt = (
+            "You MUST output valid JSON that matches the output_schema.\n"
+            "Task: Compute the sum of the two given numbers (ignore any other wording).\n"
+            f"Input JSON: {input_obj}\n"
+            'Return JSON: {"answer": a_plus_b}\n'
+        )
+        return _add_item_common(dataset_spec_version, difficulty, domain_tags, rng, input_obj, output_schema, prompt)
     a = rng.randint(1, 1000)
     b = rng.randint(1, 1000)
-
     input_obj = {"a": a, "b": b}
     output_schema = {
         "type": "object",
@@ -32,14 +75,39 @@ def _make_add_item(
         "required": ["answer"],
         "properties": {"answer": {"type": "integer"}}
     }
-
+    task_line = "Task: Add two integers.\n" if subtype == "default" else "Task: Add the two integers.\n"
     prompt = (
         "You MUST output valid JSON that matches the output_schema.\n"
-        "Task: Add two integers.\n"
+        f"{task_line}"
         f"Input JSON: {input_obj}\n"
         'Return JSON: {"answer": a_plus_b}\n'
     )
+    input_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(input_obj.keys()),
+        "properties": {k: {"type": "integer"} for k in input_obj}
+    }
+    return _add_item_common(dataset_spec_version, difficulty, domain_tags, rng, input_obj, output_schema, prompt, input_schema)
 
+
+def _add_item_common(
+    dataset_spec_version: str,
+    difficulty: str,
+    domain_tags: List[str],
+    rng: random.Random,
+    input_obj: Dict[str, Any],
+    output_schema: Dict[str, Any],
+    prompt: str,
+    input_schema: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if input_schema is None:
+        input_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": list(input_obj.keys()),
+            "properties": {k: {"type": "integer"} for k in input_obj}
+        }
     return {
         "item_id": _rand_id("item", rng),
         "dataset_spec_version": dataset_spec_version,
@@ -48,12 +116,7 @@ def _make_add_item(
         "task_type": "json_math_add",
         "prompt": prompt,
         "input": input_obj,
-        "input_schema": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["a", "b"],
-            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}
-        },
+        "input_schema": input_schema,
         "output_schema": output_schema,
         "constraints": {
             "no_subjective_judgement": True,
@@ -80,22 +143,37 @@ def _make_email_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    # Structural variants: single obvious, multiple with one target, noisy with decoys
+    subtype = _scenario_subtype(materializer_config)
     seed = hash(blueprint_id or "default") % (2**32) + repetition_index
     variant_rng = random.Random(seed)
-    variant = variant_rng.randint(0, 2)
     user = "alex" + "".join(rng.choice(string.digits) for _ in range(3))
     email = f"{user}.wu{rng.randint(10,99)}@example.com"
-    if variant == 0:
-        text = f"Please contact Alex at {email} for details."
-        task_line = "Task: Extract the email address from the text.\n"
-    elif variant == 1:
+    if subtype == "distractor":
         other = f"bob{rng.randint(1,99)}@other.com"
         text = f"Relevant contact: {email}. Ignore {other}."
         task_line = "Task: Extract the primary/relevant email address from the text.\n"
-    else:
+    elif subtype == "noisy":
+        text = f"[Header] --- Forward to: {email} --- [Footer] (do not use support@company.com)."
+        task_line = "Task: Extract the forwarding email address from the text (not the footer).\n"
+    elif subtype == "multi":
+        other = f"cc: team{rng.randint(1,9)}@co.com"
+        text = f"To: {email}\n{other}\nSubject: Re: Project. The main recipient is in the To line."
+        task_line = "Task: Extract the main recipient email from the To line only.\n"
+    elif subtype == "wrapped":
         text = f"---\nForward to: {email}\n---\nSignature: support@company.com"
         task_line = "Task: Extract the forwarding email address from the text (not the signature).\n"
+    else:
+        variant = variant_rng.randint(0, 2)
+        if variant == 0:
+            text = f"Please contact Alex at {email} for details."
+            task_line = "Task: Extract the email address from the text.\n"
+        elif variant == 1:
+            other = f"bob{rng.randint(1,99)}@other.com"
+            text = f"Relevant contact: {email}. Ignore {other}."
+            task_line = "Task: Extract the primary/relevant email address from the text.\n"
+        else:
+            text = f"---\nForward to: {email}\n---\nSignature: support@company.com"
+            task_line = "Task: Extract the forwarding email address from the text (not the signature).\n"
 
     input_obj = {"text": text}
     output_schema = {
@@ -252,17 +330,33 @@ def _make_trajectory_email_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Task: You must call search_email_db tool, then answer with the email. Variants by blueprint+repetition."""
+    """Task: You must call search_email_db tool, then answer with the email. scenario_subtype: tool_order_trap, distractor_email, multi_step_dependency, etc."""
+    subtype = _scenario_subtype(materializer_config)
     seed = hash(blueprint_id or "default") % (2**32) + repetition_index
     var_rng = random.Random(seed)
-    variant = var_rng.randint(0, 2)
     user = "alex" + "".join(rng.choice(string.digits) for _ in range(3))
     email = f"{user}.wu{rng.randint(10,99)}@example.com"
-    text = f"Please contact Alex at {email} for details."
-    if variant == 1:
-        text = f"Inbox snippet: ... From: team@co.com. Reply-to: {email}. ..."
-    elif variant == 2:
-        text = f"Thread: [noise] Target contact: {email} [end]"
+    decoy = f"bob{rng.randint(1,99)}@other.com"
+    if subtype == "distractor_email":
+        text = f"Primary contact: {email}. Secondary (ignore): {decoy}. Use search_email_db and return the primary email."
+        step_phrasing = "Use search_email_db with the text, then return JSON with the primary email only.\n"
+    elif subtype == "multi_step_dependency":
+        text = f"Step 1: Identify the contact. Step 2: The email to return is {email}. Call search_email_db then answer with that email."
+        step_phrasing = "You must call search_email_db first, then return the email identified in step 2.\n"
+    elif subtype == "tool_order_trap":
+        text = f"Email to return: {email}. You must call search_email_db before returning; do not return without calling the tool."
+        step_phrasing = "Call search_email_db first, then return JSON: {\"email\": \"...\"}. Order matters.\n"
+    elif subtype == "missing_tool_arg_risk":
+        text = f"Document: contact {email}. Use search_email_db(document) then return the email from the document."
+        step_phrasing = "Pass the document text to search_email_db, then return the extracted email in JSON.\n"
+    else:
+        variant = var_rng.randint(0, 2)
+        text = f"Please contact Alex at {email} for details."
+        if variant == 1:
+            text = f"Inbox snippet: ... From: team@co.com. Reply-to: {email}. ..."
+        elif variant == 2:
+            text = f"Thread: [noise] Target contact: {email} [end]"
+        step_phrasing = "Steps: 1) Call search_email_db tool. 2) Return JSON: {\"email\": \"...\"}\n" if variant == 0 else "Use search_email_db then return the requested email in JSON.\n"
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -270,7 +364,6 @@ def _make_trajectory_email_item(
         "required": ["email"],
         "properties": {"email": {"type": "string"}}
     }
-    step_phrasing = "Steps: 1) Call search_email_db tool. 2) Return JSON: {\"email\": \"...\"}\n" if variant == 0 else "Use search_email_db then return the requested email in JSON.\n"
     prompt = (
         "You MUST call the search_email_db tool first, then output valid JSON that matches the output_schema.\n"
         "Task: Use search_email_db to find the email in the text, then return it.\n"
@@ -317,19 +410,33 @@ def _make_structured_extraction_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Extract email + name from text. Uses programmatic_check; variants by blueprint+repetition."""
+    """Extract email + name from text. Uses programmatic_check; scenario_subtype drives distractor/noisy/multi_record/conflicting_fields."""
+    subtype = _scenario_subtype(materializer_config)
     seed = hash(blueprint_id or "default") % (2**32) + repetition_index
     var_rng = random.Random(seed)
-    variant = var_rng.randint(0, 2)
     name = "alice" + "".join(rng.choice(string.ascii_lowercase) for _ in range(3))
     email = f"{name}{rng.randint(10, 99)}@example.com"
-    if variant == 0:
-        text = f"Contact {name.capitalize()} at {email} for support."
-    elif variant == 1:
-        text = f"Support ticket #123: Requester {name.capitalize()}, email {email}. Please extract."
+    if subtype == "distractor":
+        text = f"Contact: {name.capitalize()}, {email}. Do not use: john@example.com or Jane."
+        input_obj = {"text": text}
+    elif subtype == "noisy":
+        text = f"[Ticket #123] Requester: {name.capitalize()} | Email: {email} | [End]. Extract name and email only."
+        input_obj = {"text": text}
+    elif subtype == "multi_record":
+        text = f"First: Bob, bob@x.com. Second (use this one): {name.capitalize()}, {email}. Extract the second record only."
+        input_obj = {"text": text}
+    elif subtype == "conflicting_fields":
+        text = f"Name: {name.capitalize()}\nEmail (primary): {email}\nEmail (alt, ignore): other@example.com\nExtract primary name and primary email."
+        input_obj = {"text": text}
     else:
-        text = f"Name: {name.capitalize()}\nEmail: {email}\n(Other: john@example.com is not the target.)"
-    input_obj = {"text": text}
+        variant = var_rng.randint(0, 2)
+        if variant == 0:
+            text = f"Contact {name.capitalize()} at {email} for support."
+        elif variant == 1:
+            text = f"Support ticket #123: Requester {name.capitalize()}, email {email}. Please extract."
+        else:
+            text = f"Name: {name.capitalize()}\nEmail: {email}\n(Other: john@example.com is not the target.)"
+        input_obj = {"text": text}
     output_schema = {
         "type": "object",
         "additionalProperties": False,
@@ -373,6 +480,19 @@ def _make_structured_extraction_item(
     }
 
 
+# Boundary/negation templates still map to one of positive/neutral/negative for exact-match judge.
+BOUNDARY_TEMPLATES = [
+    ("Not bad at all, actually quite good.", "positive"),
+    ("I wouldn't say I'm disappointed.", "neutral"),
+    ("It's not great.", "negative"),
+]
+NEGATION_TEMPLATES = [
+    ("I don't dislike it.", "positive"),
+    ("Nothing to complain about, nothing to praise.", "neutral"),
+    ("I can't recommend it.", "negative"),
+]
+
+
 def _make_classify_canonical_item(
     spec: Dict[str, Any],
     dataset_spec_version: str,
@@ -385,11 +505,20 @@ def _make_classify_canonical_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Classification with canonicalization. Vary template by blueprint+repetition."""
+    """Classification with canonicalization. scenario_subtype: boundary_case, label_confusion, negation."""
+    subtype = _scenario_subtype(materializer_config)
     seed = hash(blueprint_id or "default") % (2**32) + repetition_index
     var_rng = random.Random(seed)
-    idx = var_rng.randint(0, len(SENTIMENT_TEMPLATES) - 1) if SENTIMENT_TEMPLATES else 0
-    text, _ = SENTIMENT_TEMPLATES[idx] if SENTIMENT_TEMPLATES else ("Neutral.", "neutral")
+    if subtype == "boundary_case" and BOUNDARY_TEMPLATES:
+        text, _ = BOUNDARY_TEMPLATES[var_rng.randint(0, len(BOUNDARY_TEMPLATES) - 1)]
+    elif subtype == "negation" and NEGATION_TEMPLATES:
+        text, _ = NEGATION_TEMPLATES[var_rng.randint(0, len(NEGATION_TEMPLATES) - 1)]
+    elif subtype == "label_confusion":
+        text = "Mediocre. Not good, not terrible."
+        _ = "neutral"
+    else:
+        idx = var_rng.randint(0, len(SENTIMENT_TEMPLATES) - 1) if SENTIMENT_TEMPLATES else 0
+        text, _ = SENTIMENT_TEMPLATES[idx] if SENTIMENT_TEMPLATES else ("Neutral.", "neutral")
     input_obj = {"text": text}
     output_schema = {
         "type": "object",
@@ -443,19 +572,33 @@ def _make_factual_grounded_qa_item(
     materializer_config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Minimal synthetic placeholder for factual_grounded_qa; variants by blueprint+repetition."""
+    """Factual grounded QA; scenario_subtype: distractor_context, near_match, multi_hopish, citation_conflict. Exact-match judgeable."""
+    subtype = _scenario_subtype(materializer_config)
     seed = hash(blueprint_id or "default") % (2**32) + repetition_index
     var_rng = random.Random(seed)
-    variant = var_rng.randint(0, 2)
-    if variant == 0:
-        context = "The first programmable computer was built in 1941 (Z3 by Konrad Zuse)."
+    if subtype == "distractor_context":
+        context = "The first programmable computer was the Z3 (1941, Konrad Zuse). Unrelated: ENIAC (1945) was the first general-purpose electronic computer. Answer using only the Z3 fact."
         question = "When was the first programmable computer built?"
-    elif variant == 1:
+    elif subtype == "near_match":
         context = "Z3 (1941, Konrad Zuse) was the first programmable computer. ENIAC came later (1945)."
-        question = "Which machine was the first programmable computer?"
+        question = "Which machine was the first programmable computer? Give the exact name."
+    elif subtype == "multi_hopish":
+        context = "First programmable: 1941. The machine was the Z3, built by Konrad Zuse. Do not confuse with ENIAC (1945)."
+        question = "In what year was the Z3 built?"
+    elif subtype == "citation_conflict":
+        context = "Source A: First programmable computer built in 1941 (Z3). Source B: Z3 built by Konrad Zuse in 1941. Use Source A and B for the year."
+        question = "When was the first programmable computer built?"
     else:
-        context = "First programmable computer: 1941, Z3, Konrad Zuse. Do not confuse with ENIAC (1945)."
-        question = "In what year was the first programmable computer built?"
+        variant = var_rng.randint(0, 2)
+        if variant == 0:
+            context = "The first programmable computer was built in 1941 (Z3 by Konrad Zuse)."
+            question = "When was the first programmable computer built?"
+        elif variant == 1:
+            context = "Z3 (1941, Konrad Zuse) was the first programmable computer. ENIAC came later (1945)."
+            question = "Which machine was the first programmable computer?"
+        else:
+            context = "First programmable computer: 1941, Z3, Konrad Zuse. Do not confuse with ENIAC (1945)."
+            question = "In what year was the first programmable computer built?"
     input_obj = {"context": context, "question": question}
     output_schema = {
         "type": "object",

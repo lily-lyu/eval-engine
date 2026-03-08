@@ -1,7 +1,9 @@
 """
 Compiler: intent_spec + eval_families + prompt_blueprints + judge_specs -> compiled_plan.
 Produces backward-compatible dataset_spec for the existing execution engine.
+Enforces hard_min_fraction for failure-seeking intents.
 """
+import math
 from typing import Any, Dict, List
 
 from ..core.failure_codes import COMPILE_CONTRACT_MISMATCH, MATERIALIZER_UNSUPPORTED
@@ -13,6 +15,13 @@ PLANNER_VERSION = "1.0.0"
 COMPILER_VERSION = "1.0.0"
 BLUEPRINT_SCHEMA_VERSION = "1.0.0"
 JUDGE_SPEC_SCHEMA_VERSION = "1.0.0"
+
+# Hard families that get min_count guarantees in failure-seeking runs
+COMPILER_HARD_FAMILY_IDS = frozenset({
+    "trajectory.email_lookup",
+    "grounded.qa.factual",
+    "extraction.structured",
+})
 
 
 def compile_to_plan(
@@ -98,6 +107,20 @@ def compile_to_plan(
             f"{COMPILE_CONTRACT_MISMATCH}: compiled capability_targets is empty; "
             "at least one eval_family must produce a target."
         )
+
+    # Failure-seeking: at least one slot per hard family (trajectory, grounded_qa, extraction.structured); honor hard_min_fraction
+    planner_objective = (intent_spec.get("planner_objective") or "balanced").lower()
+    difficulty_floor = (intent_spec.get("difficulty_floor") or "").lower()
+    if (planner_objective == "failure_seeking" or difficulty_floor == "hard") and batch_size:
+        hard_targets = [t for t in capability_targets if (t.get("family_id") or "") in COMPILER_HARD_FAMILY_IDS]
+        if hard_targets:
+            hard_families_seen = {t["family_id"] for t in hard_targets}
+            # At least 1 slot per hard family (spread across blueprints of that family)
+            hard_min_slots = max(len(hard_families_seen), int(math.ceil(batch_size * (intent_spec.get("hard_min_fraction") if isinstance(intent_spec.get("hard_min_fraction"), (int, float)) else 0.3))))
+            per_target = max(1, int(math.ceil(hard_min_slots / len(hard_targets))))
+            for t in capability_targets:
+                if (t.get("family_id") or "") in COMPILER_HARD_FAMILY_IDS:
+                    t["min_count"] = per_target
 
     dataset_name = intent_spec.get("dataset_name") or f"intent_{intent_name}_{intent_version}".replace(" ", "_")
     allowed_domain_tags = list(set(domain_tags)) if domain_tags else ["general"]

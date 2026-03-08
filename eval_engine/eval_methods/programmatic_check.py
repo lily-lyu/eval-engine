@@ -24,7 +24,7 @@ NORMALIZERS: Dict[str, Any] = {
 }
 
 
-# ---- math_add_v1 (unchanged logic; accepts optional plan for signature consistency) ----
+# ---- math_add_v1: a+b or (a+b)+c when c present ----
 def run_programmatic_check_math_add(
     item_input: Dict[str, Any],
     parsed_output: Dict[str, Any],
@@ -37,9 +37,15 @@ def run_programmatic_check_math_add(
     except Exception as e:
         return False, f"programmatic_check parse error: {e}"
 
-    expected = a + b
+    if "c" in item_input:
+        c = int(item_input["c"])
+        expected = a + b + c
+        label = "(a+b)+c"
+    else:
+        expected = a + b
+        label = "a+b"
     if ans == expected:
-        return True, "programmatic_check passed (answer == a+b)"
+        return True, f"programmatic_check passed (answer == {label})"
     return False, f"programmatic_check failed: expected {expected}, got {ans}"
 
 

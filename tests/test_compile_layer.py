@@ -108,9 +108,8 @@ def test_invalid_intent_empty_capability_focus_rejected():
 
 
 def test_invalid_intent_missing_required_field_rejected():
+    # evaluation_goal is required; missing it must raise schema invalid
     intent = {
-        "intent_name": "x",
-        "evaluation_goal": "Test.",
         "capability_focus": ["extraction"],
     }
     with pytest.raises(ValueError) as exc_info:
@@ -210,3 +209,93 @@ def test_compile_endpoint_invalid_intent_returns_400():
     intent = {"intent_name": "x", "evaluation_goal": "G", "capability_focus": []}
     resp = client.post("/compile", json={"intent_json": json.dumps(intent)})
     assert resp.status_code == 400
+
+
+def test_lighter_intent_spec_compiles_without_intent_name_or_version():
+    """UI default example (no intent_name / intent_spec_version) compiles in both deterministic and hybrid paths."""
+    lighter = {
+        "evaluation_goal": "Evaluate email extraction and multi-step tool use reliability.",
+        "capability_focus": ["extraction", "trajectory"],
+        "difficulty_mix": {"medium": 0.3, "hard": 0.7},
+        "risk_focus": ["schema_adherence", "tool_use_correctness", "instruction_following"],
+        "batch_size": 12,
+    }
+    plan = compile_intent_to_plan(lighter, planner_mode="deterministic")
+    assert "compiled_dataset_spec" in plan
+    assert "eval_families" in plan
+    validate_or_raise("compiled_plan.schema.json", plan)
+    ds = plan["compiled_dataset_spec"]
+    assert len(ds.get("capability_targets", [])) >= 1
+
+
+def test_compile_endpoint_accepts_lighter_intent():
+    """POST /compile accepts intent without intent_name or intent_spec_version (same as UI default)."""
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+
+    client = TestClient(app)
+    lighter = {
+        "evaluation_goal": "Evaluate email extraction and multi-step tool use reliability.",
+        "capability_focus": ["extraction", "trajectory"],
+        "batch_size": 12,
+    }
+    resp = client.post("/compile", json={"intent_json": json.dumps(lighter)})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "compiled_dataset_spec" in data
+    assert "eval_families" in data
+
+
+def test_run_batch_effective_quota_caps_by_smaller_of_quota_and_batch_size():
+    """When intent has batch_size, effective released items = min(UI quota, planner batch_size)."""
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    from eval_engine.api.app import app
+    from eval_engine.services.run_index_service import get_repo_root
+
+    client = TestClient(app)
+    runs_dir = get_repo_root() / "runs"
+
+    # Case 1: batch_size=12, quota=5 → expect 5 items
+    intent_12 = {
+        "evaluation_goal": "Evaluate extraction.",
+        "capability_focus": ["extraction"],
+        "batch_size": 12,
+    }
+    resp1 = client.post(
+        "/runs",
+        json={
+            "intent_json": json.dumps(intent_12),
+            "quota": 5,
+            "sut": "mock",
+            "model_version": "mock-1",
+        },
+    )
+    assert resp1.status_code == 200, resp1.text
+    run_id_1 = resp1.json()["run_id"]
+    batch_plan_path_1 = runs_dir / run_id_1 / "artifacts" / "batch_plan.json"
+    assert batch_plan_path_1.exists(), f"Expected {batch_plan_path_1}"
+    batch_plan_1 = json.loads(batch_plan_path_1.read_text(encoding="utf-8"))
+    assert batch_plan_1["total_slots"] == 5, "quota=5 with batch_size=12 should yield 5 released items"
+
+    # Case 2: batch_size=4, quota=10 → expect 4 items
+    intent_4 = {
+        "evaluation_goal": "Evaluate extraction.",
+        "capability_focus": ["extraction"],
+        "batch_size": 4,
+    }
+    resp2 = client.post(
+        "/runs",
+        json={
+            "intent_json": json.dumps(intent_4),
+            "quota": 10,
+            "sut": "mock",
+            "model_version": "mock-1",
+        },
+    )
+    assert resp2.status_code == 200, resp2.text
+    run_id_2 = resp2.json()["run_id"]
+    batch_plan_path_2 = runs_dir / run_id_2 / "artifacts" / "batch_plan.json"
+    assert batch_plan_path_2.exists(), f"Expected {batch_plan_path_2}"
+    batch_plan_2 = json.loads(batch_plan_path_2.read_text(encoding="utf-8"))
+    assert batch_plan_2["total_slots"] == 4, "batch_size=4 with quota=10 should yield 4 released items"

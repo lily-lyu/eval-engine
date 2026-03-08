@@ -90,15 +90,13 @@ const ADVANCED_SPEC_PRESETS = [
 
 const DEFAULT_SPEC = JSON.stringify(SMOKE_SPEC, null, 2);
 
-// —— Intent mode: high-level intent -> compiled plan —————————————————————
+// —— Planner input: high-level goal -> compiled plan —————————————————————
 const DEFAULT_INTENT_SPEC = {
-  intent_name: "extraction_and_trajectory",
-  intent_spec_version: "1.0.0",
-  evaluation_goal: "Evaluate email extraction and trajectory tool-use capability.",
-  target_domain: ["extraction", "trajectory"],
+  evaluation_goal: "Evaluate email extraction and multi-step tool use reliability.",
   capability_focus: ["extraction", "trajectory"],
-  batch_size: 4,
-  defaults: { seed: 42, max_prompt_length: 20000, max_retries_per_stage: 2 },
+  difficulty_mix: { medium: 0.3, hard: 0.7 },
+  risk_focus: ["schema_adherence", "tool_use_correctness", "instruction_following"],
+  batch_size: 12,
 };
 const DEFAULT_INTENT_JSON = JSON.stringify(DEFAULT_INTENT_SPEC, null, 2);
 
@@ -132,7 +130,7 @@ export default function HomePage() {
   const [latestRunId, setLatestRunId] = useState("");
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
   const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>(QUICK_DEMO_CASES_FALLBACK);
-  const [plannerMode, setPlannerMode] = useState<string>("deterministic");
+  const [plannerMode] = useState<string>("hybrid");
   const [plannerModel, setPlannerModel] = useState("gemini-3-flash-preview");
   const [plannerTemperature, setPlannerTemperature] = useState<number | "">("");
   const [showRawPlannerOutputs, setShowRawPlannerOutputs] = useState(false);
@@ -302,26 +300,27 @@ export default function HomePage() {
       <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="mb-8">
           <div className="text-xs uppercase tracking-[0.2em] text-neutral-500">
-            Schema-first evaluation control room
+            Planner-driven evaluation and failure diagnosis
           </div>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white">
             Evaluation Engine
           </h1>
           <p className="mt-3 max-w-3xl text-lg text-neutral-400">
-            Trace every evaluation stage, inspect typed failures, and turn failure clusters into owned
-            remediation work.
+            Run evaluations from high-level goals, trace every stage, and inspect typed failures with
+            diagnosis—not just pass/fail.
           </p>
         </div>
 
         <div className="mb-8 grid gap-4 md:grid-cols-4">
           <StatCard label="Recent runs" value={String(runs.length)} />
           <StatCard
-            label="Latest pass rate"
+            label="Latest run pass rate"
             value={runs.length ? formatPassRate(runs[0].pass_rate) : "—"}
           />
           <StatCard
             label="Most recent failure"
             value={latestFailedCluster ?? (failedRunsCount > 0 ? "…" : "—")}
+            hint="Most recent failure observed across recent runs"
           />
           <StatCard
             label="Failed runs"
@@ -358,7 +357,8 @@ export default function HomePage() {
             {runSectionMode === "quick" ? (
               <div className="space-y-4">
                 <p className="text-sm text-neutral-400">
-                  One-click canned runs for validating the pipeline and showing failure handling.
+                  Demo the evaluation pipeline and failure handling: run a one-click failure case, then
+                  open the run to see stages, typed failures, and diagnosis.
                 </p>
                 <div>
                   <label className="mb-2 block text-sm text-neutral-300">Failure demo case</label>
@@ -375,22 +375,26 @@ export default function HomePage() {
                   </select>
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col gap-3">
                   <button
                     onClick={handleFailureDemo}
                     disabled={loading}
-                    className="rounded-xl bg-white px-4 py-2 text-black disabled:opacity-50"
+                    className="w-full rounded-xl bg-white px-4 py-2.5 text-black font-medium disabled:opacity-50 sm:w-auto"
                   >
                     {loading ? "Running..." : "Run Failure Demo"}
                   </button>
-
-                  <button
-                    onClick={handleRegression}
-                    disabled={loading}
-                    className="rounded-xl border border-neutral-700 px-4 py-2 text-neutral-100 disabled:opacity-50"
-                  >
-                    Run Golden Regression
-                  </button>
+                  <div className="flex items-center gap-2 text-xs text-neutral-500">
+                    <span>Optional:</span>
+                    <button
+                      type="button"
+                      onClick={handleRegression}
+                      disabled={loading}
+                      className="underline hover:text-neutral-400 disabled:opacity-50"
+                    >
+                      Run golden regression
+                    </button>
+                    <span>for release confidence.</span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -410,7 +414,7 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm text-neutral-300">Advanced input</label>
+                  <label className="mb-2 block text-sm text-neutral-300">Run definition</label>
                   <div className="mb-2 flex gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 p-1">
                     <button
                       type="button"
@@ -432,8 +436,12 @@ export default function HomePage() {
                           : "text-neutral-400 hover:bg-neutral-900"
                       }`}
                     >
-                      Intent
+                      Planner input
                     </button>
+                  </div>
+                  <div className="mt-1.5 space-y-0.5 text-xs text-neutral-500">
+                    <p><span className="text-neutral-400">Planner input:</span> Describe what capabilities you want to evaluate at a high level. The planner will decompose this into evaluation families, generate test targets, and compile the batch spec.</p>
+                    <p><span className="text-neutral-400">Custom JSON:</span> Provide a prebuilt dataset/spec and run it directly without planner decomposition.</p>
                   </div>
                 </div>
 
@@ -482,65 +490,81 @@ export default function HomePage() {
                 ) : (
                   <>
                     <p className="text-sm text-neutral-400">
-                      System-level intent: capability_focus (e.g. extraction, trajectory) is compiled into eval families and then into dataset_spec.
+                      Describe what capabilities you want to evaluate at a high level. The planner will decompose this into evaluation families, generate test targets, and compile the batch spec.
                     </p>
                     <div className="mt-3 space-y-3">
                       <div>
                         <label className="mb-1 block text-sm text-neutral-300">Planner mode</label>
-                        <select
-                          value={plannerMode}
-                          onChange={(e) => setPlannerMode(e.target.value)}
-                          className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-                        >
-                          <option value="deterministic">Deterministic (catalog only)</option>
-                          <option value="llm">LLM (Gemini)</option>
-                          <option value="hybrid">Hybrid (Gemini + normalize)</option>
-                        </select>
+                        <div className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-200">
+                          Hybrid (LLM + normalize)
+                        </div>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Uses the planner to generate candidate evaluation structure, then normalizes to the supported catalog for predictable execution.
+                        </p>
                       </div>
-                      {(plannerMode === "llm" || plannerMode === "hybrid") && (
-                        <>
-                          <div>
-                            <label className="mb-1 block text-sm text-neutral-300">Model (optional)</label>
-                            <input
-                              type="text"
-                              value={plannerModel}
-                              onChange={(e) => setPlannerModel(e.target.value)}
-                              placeholder="gemini-3-flash-preview"
-                              className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-mono"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-sm text-neutral-300">Temperature (optional)</label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={2}
-                              step={0.1}
-                              value={plannerTemperature === "" ? "" : plannerTemperature}
-                              onChange={(e) =>
-                                setPlannerTemperature(e.target.value === "" ? "" : Number(e.target.value))
-                              }
-                              placeholder="0.2"
-                              className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-                            />
-                          </div>
-                          {geminiUnavailable && (
-                            <p className="text-sm text-amber-400">
-                              Gemini planner is not configured on the backend (missing GEMINI_API_KEY). Use deterministic mode or set GEMINI_API_KEY on the server.
-                            </p>
-                          )}
-                        </>
-                      )}
-                      <label className="flex items-center gap-2 text-sm text-neutral-400">
+                      <div>
+                        <label className="mb-1 block text-sm text-neutral-300">Model (optional)</label>
                         <input
-                          type="checkbox"
-                          checked={showRawPlannerOutputs}
-                          onChange={(e) => setShowRawPlannerOutputs(e.target.checked)}
-                          className="rounded border-neutral-700"
+                          type="text"
+                          value={plannerModel}
+                          onChange={(e) => setPlannerModel(e.target.value)}
+                          placeholder="gemini-3-flash-preview"
+                          className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-mono"
                         />
-                        Show raw planner outputs (when available)
-                      </label>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm text-neutral-300">Temperature (optional)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          value={plannerTemperature === "" ? "" : plannerTemperature}
+                          onChange={(e) =>
+                            setPlannerTemperature(e.target.value === "" ? "" : Number(e.target.value))
+                          }
+                          placeholder="0.2"
+                          className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      {geminiUnavailable && (
+                        <p className="text-sm text-amber-400">
+                          Gemini planner is not configured on the backend (missing GEMINI_API_KEY). Set GEMINI_API_KEY on the server to use the planner.
+                        </p>
+                      )}
+                      <div>
+                        <label className="flex items-center gap-2 text-sm text-neutral-400">
+                          <input
+                            type="checkbox"
+                            checked={showRawPlannerOutputs}
+                            onChange={(e) => setShowRawPlannerOutputs(e.target.checked)}
+                            className="rounded border-neutral-700"
+                          />
+                          Show planner artifacts
+                        </label>
+                        <p className="mt-0.5 text-xs text-neutral-500">
+                          Displays intermediate planner outputs such as evaluation families and generated targets.
+                        </p>
+                      </div>
                     </div>
+                    {(() => {
+                      let plannerObjective: string | null = null;
+                      try {
+                        const parsed = JSON.parse(intentJson) as Record<string, unknown>;
+                        if (typeof parsed.planner_objective === "string") plannerObjective = parsed.planner_objective;
+                      } catch {
+                        // ignore
+                      }
+                      return plannerObjective ? (
+                        <div className="mt-3 rounded-xl border border-neutral-700 bg-neutral-900/50 p-3">
+                          <div className="text-sm font-medium text-neutral-300">Planner objective</div>
+                          <div className="mt-1 font-mono text-sm text-neutral-200">{plannerObjective}</div>
+                          <p className="mt-1 text-xs text-neutral-500">
+                            Biases the planner toward harder, failure-prone but still machine-checkable tasks.
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
                     <textarea
                       value={intentJson}
                       onChange={(e) => setIntentJson(e.target.value)}
@@ -554,40 +578,85 @@ export default function HomePage() {
                         disabled={geminiUnavailable}
                         className="rounded-xl border border-neutral-700 px-3 py-2 text-sm text-neutral-200 disabled:opacity-50"
                       >
-                        Preview compile
+                        Preview plan
                       </button>
                       {compileError && (
                         <span className="self-center text-sm text-red-400">{compileError}</span>
                       )}
                     </div>
                     {compilePreview && (
-                      <div className="mt-3 rounded-xl border border-neutral-700 bg-neutral-900/50 p-3">
-                        <div className="mb-2 text-sm font-medium text-neutral-300">
-                          Compiled plan (preview)
+                      <div className="mt-3 space-y-3">
+                        <div className="text-sm font-medium text-neutral-300">Planner output preview</div>
+                        <div className="rounded-xl border border-neutral-700 bg-neutral-900/50 p-3 space-y-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-neutral-500">Evaluation families</div>
+                            {(() => {
+                              const families = (compilePreview.eval_families as Array<{ family_id?: string }>) ?? [];
+                              if (families.length === 0) {
+                                return <p className="mt-1 text-sm text-neutral-500">No evaluation families in this plan.</p>;
+                              }
+                              return (
+                                <ul className="mt-1 list-inside list-disc text-sm text-neutral-300">
+                                  {families.map((f, i) => (
+                                    <li key={i}>{f.family_id ?? "—"}</li>
+                                  ))}
+                                </ul>
+                              );
+                            })()}
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-neutral-500">Generated test targets</div>
+                            {(() => {
+                              const targets = (compilePreview.compiled_dataset_spec as Record<string, unknown> | undefined)?.capability_targets as Array<{ target_id?: string; difficulty?: string }> | undefined;
+                              if (!targets?.length) {
+                                return <p className="mt-1 text-sm text-neutral-500">No test targets in this plan.</p>;
+                              }
+                              return (
+                                <ul className="mt-1 list-inside list-disc text-sm text-neutral-300">
+                                  {targets.map((t, i) => (
+                                    <li key={i}>{t.target_id ?? "—"}{t.difficulty ? ` (${t.difficulty})` : ""}</li>
+                                  ))}
+                                </ul>
+                              );
+                            })()}
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-neutral-500">Batch spec summary</div>
+                            {(() => {
+                              const spec = compilePreview.compiled_dataset_spec as Record<string, unknown> | undefined;
+                              const name = spec?.dataset_name as string | undefined;
+                              const targetList = (spec?.capability_targets as unknown[]) ?? [];
+                              const targetCount = targetList.length;
+                              if (!spec) {
+                                return <p className="mt-1 text-sm text-neutral-500">No batch spec in this plan.</p>;
+                              }
+                              return (
+                                <p className="mt-1 text-sm text-neutral-300">
+                                  Dataset: {name ?? "—"} · {targetCount} target{targetCount !== 1 ? "s" : ""}
+                                </p>
+                              );
+                            })()}
+                          </div>
                         </div>
-                        <pre className="max-h-64 overflow-auto text-xs text-neutral-400">
-                          {JSON.stringify(
-                            (() => {
-                              const meta = (compilePreview.compile_metadata || {}) as Record<string, unknown>;
-                              const base = {
-                                compile_metadata: showRawPlannerOutputs
-                                  ? meta
-                                  : {
-                                      ...meta,
-                                      raw_llm_eval_families: undefined,
-                                      raw_llm_prompt_blueprints: undefined,
-                                      raw_llm_judge_specs: undefined,
-                                      planner_critic_report: undefined,
-                                    },
-                                eval_families_count: (compilePreview.eval_families as unknown[])?.length,
-                                compiled_dataset_spec: compilePreview.compiled_dataset_spec,
-                              };
-                              return base;
-                            })(),
-                            null,
-                            2
-                          )}
-                        </pre>
+                        {showRawPlannerOutputs && (
+                          <div className="rounded-xl border border-neutral-700 bg-neutral-900/50 p-3">
+                            <div className="mb-2 text-sm font-medium text-neutral-300">Raw compile (preview)</div>
+                            <pre className="max-h-64 overflow-auto text-xs text-neutral-400">
+                              {JSON.stringify(
+                                (() => {
+                                  const meta = (compilePreview.compile_metadata || {}) as Record<string, unknown>;
+                                  return {
+                                    compile_metadata: meta,
+                                    eval_families_count: (compilePreview.eval_families as unknown[])?.length,
+                                    compiled_dataset_spec: compilePreview.compiled_dataset_spec,
+                                  };
+                                })(),
+                                null,
+                                2
+                              )}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -595,7 +664,7 @@ export default function HomePage() {
 
                     <div className="flex flex-wrap items-center gap-4">
                   <div>
-                    <label className="mb-2 block text-sm text-neutral-300">Quota</label>
+                    <label className="mb-2 block text-sm text-neutral-300">Max released items</label>
                     <input
                       type="number"
                       min={1}
@@ -604,6 +673,10 @@ export default function HomePage() {
                       onChange={(e) => setQuota(Number(e.target.value) || 1)}
                       className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
                     />
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Caps the number of items actually released in this run.
+                      {advancedMode === "intent" && " If both are set, the run uses the smaller of planner batch_size and max released items."}
+                    </p>
                   </div>
                   <div className="flex items-end pb-1">
                     <button
@@ -672,7 +745,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="mt-4 text-sm text-neutral-400">
-                    Open mission control to inspect pipeline stages, item traces, and release status.
+                    Open mission control to inspect pipeline stages, item traces, and diagnosis.
                   </div>
                 </Link>
               ) : (
