@@ -3,7 +3,7 @@ Intent planner: decompose high-level intent_spec into a list of eval_family.
 Supports mode=deterministic | llm | hybrid. Catalog-anchored; LLM may propose, compiler validates.
 """
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from ..config import (
     PLANNER_MODE,
@@ -20,7 +20,9 @@ from ..core.failure_codes import (
 )
 from ..core.family_catalog import (
     SUPPORTED_TASK_TYPES,
+    canonicalize_family_id,
     get_family,
+    get_family_alias_map,
     resolve_capability_focus_to_families,
 )
 from ..core.schema import validate_or_raise
@@ -119,13 +121,31 @@ def _plan_intent_deterministic(intent_spec: Dict[str, Any]) -> List[Dict[str, An
 def _normalize_eval_families_to_catalog(
     eval_families: List[Dict[str, Any]],
     allow_experimental: bool,
-) -> List[Dict[str, Any]]:
-    """Map LLM-proposed families to catalog where possible; enforce whitelist and task types."""
-    import json
-
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Map LLM-proposed families to catalog where possible; enforce whitelist and task types.
+    Uses canonicalize_family_id for safe alias mapping (e.g. trajectory.email_tool -> trajectory.email_lookup).
+    Returns (normalized_families, repair_warnings)."""
     normalized: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    alias_map = get_family_alias_map()
+
     for fam in eval_families:
-        family_id = fam.get("family_id") or ""
+        original_id = fam.get("family_id") or ""
+        canonical_id, repair_info = canonicalize_family_id(original_id, allow_experimental=allow_experimental)
+        if canonical_id is None:
+            # Unsupported and no alias; suggest alias if one exists (for error message)
+            suggested = alias_map.get(original_id)
+            msg = (
+                f"{LLM_FAMILY_UNSUPPORTED}: family_id '{original_id}' is not in the catalog and allow_experimental is false."
+            )
+            if suggested:
+                msg += f" Did you mean '{suggested}'?"
+            raise ValueError(msg)
+        if repair_info and repair_info.get("reason") == "alias_map":
+            warnings.append(
+                f"Normalized family_id from '{repair_info['from']}' to '{repair_info['to']}' via alias_map"
+            )
+        family_id = canonical_id
         catalog_fam = get_family(family_id, allow_experimental=allow_experimental)
         if catalog_fam:
             # Overlay catalog: allowed_eval_methods, materializer_type, observable_targets, etc.
@@ -140,6 +160,7 @@ def _normalize_eval_families_to_catalog(
                 )
             norm = {
                 **fam,
+                "family_id": family_id,
                 "allowed_eval_methods": allowed,
                 "materializer_type": materializer_type,
                 "observable_targets": list(catalog_fam.get("observable_targets", fam.get("observable_targets", []))),
@@ -147,11 +168,11 @@ def _normalize_eval_families_to_catalog(
             }
             normalized.append(norm)
         else:
+            # allow_experimental and canonical_id passed but get_family returned None (experimental family?)
             if not allow_experimental:
                 raise ValueError(
-                    f"{LLM_FAMILY_UNSUPPORTED}: family_id '{family_id}' is not in the catalog and allow_experimental is false."
+                    f"{LLM_FAMILY_UNSUPPORTED}: family_id '{original_id}' is not in the catalog and allow_experimental is false."
                 )
-            # Experimental: must still satisfy schema and whitelist
             allowed = list(fam.get("allowed_eval_methods", []))
             allowed = [m for m in allowed if m in ALLOWED_EVAL_METHODS_WHITELIST]
             if not allowed:
@@ -165,9 +186,9 @@ def _normalize_eval_families_to_catalog(
                 raise ValueError(
                     f"{LLM_FAMILY_UNSUPPORTED}: experimental family_id={family_id} requires materializer_type from catalog or supported list."
                 )
-            norm = {**fam, "allowed_eval_methods": allowed, "materializer_type": materializer_type}
+            norm = {**fam, "family_id": family_id, "allowed_eval_methods": allowed, "materializer_type": materializer_type}
             normalized.append(norm)
-    return normalized
+    return normalized, warnings
 
 
 def plan_intent(
@@ -177,12 +198,14 @@ def plan_intent(
     planner_model: str | None = None,
     planner_temperature: float | None = None,
     allow_experimental: bool | None = None,
+    warnings_out: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Decompose intent_spec into eval_families. Supports deterministic | llm | hybrid.
     - deterministic: catalog-only (current v1).
     - llm: Gemini proposes schema-validated eval_families.
-    - hybrid: Gemini proposes, then catalog normalization / whitelist enforcement.
+    - hybrid: Gemini proposes, then catalog normalization / whitelist enforcement (including alias map).
+    If warnings_out is provided and hybrid normalization repairs family_ids, repair messages are appended.
     """
     mode = (mode or PLANNER_MODE).lower()
     planner_defaults = intent_spec.get("planner_defaults") or {}
@@ -205,7 +228,9 @@ def plan_intent(
     if not isinstance(raw_list, list):
         raise ValueError(f"{INTENT_SCHEMA_INVALID}: expected list of eval_families, got {type(raw_list).__name__}")
     if mode == "hybrid":
-        raw_list = _normalize_eval_families_to_catalog(raw_list, allow_experimental=allow_exp)
+        raw_list, norm_warnings = _normalize_eval_families_to_catalog(raw_list, allow_experimental=allow_exp)
+        if warnings_out is not None:
+            warnings_out.extend(norm_warnings)
     if not raw_list:
         raise ValueError(
             f"{FAMILY_CATALOG_MISS}: no eval_families produced (or all filtered out)."

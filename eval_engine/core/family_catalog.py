@@ -2,9 +2,21 @@
 Controlled family catalog for the intent planning layer.
 Planners select/compose from this catalog; no arbitrary ontology invention.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 FAMILY_CATALOG_VERSION = "1.0.0"
+
+# Safe near-miss aliases for hybrid normalization (alias -> canonical family_id).
+FAMILY_ID_ALIAS_MAP: Dict[str, str] = {
+    "trajectory.email_tool": "trajectory.email_lookup",
+    "trajectory.email_search": "trajectory.email_lookup",
+    "structured.extraction": "extraction.structured",
+    "email.extraction": "extraction.email",
+    "factual.qa": "grounded.qa.factual",
+    "sentiment.classification": "classification.sentiment",
+    "canonical.classification": "classification.canonical",
+    "addition.math": "math.add",
+}
 
 # Supported task_type values that map to materializers (must match task registry).
 SUPPORTED_TASK_TYPES = frozenset({
@@ -131,6 +143,41 @@ FAMILIES: Dict[str, Dict[str, Any]] = {
         checker_name="math_add_v1",
     ),
 }
+
+
+def get_supported_family_ids() -> List[str]:
+    """Return the exact list of supported (non-experimental) catalog family IDs."""
+    return [f["family_id"] for f in FAMILIES.values() if not f.get("experimental")]
+
+
+def get_family_alias_map() -> Dict[str, str]:
+    """Return the map from alias family_id -> canonical family_id for hybrid normalization."""
+    return dict(FAMILY_ID_ALIAS_MAP)
+
+
+def canonicalize_family_id(
+    family_id: str,
+    allow_experimental: bool = False,
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Resolve family_id to a supported catalog ID or None.
+    - If family_id is already supported, return (family_id, None).
+    - Else if family_id is in alias map, return (mapped_family_id, repair_info).
+    - Else if allow_experimental is True, return (family_id, None).
+    - Else return (None, repair_info).
+    repair_info: {"field": "family_id", "from": "<original>", "to": "<mapped or None>", "reason": "alias_map"|"unsupported"}
+    """
+    if not family_id:
+        return (None, {"field": "family_id", "from": family_id, "to": None, "reason": "unsupported"})
+    if get_family(family_id, allow_experimental=allow_experimental) is not None:
+        return (family_id, None)
+    alias_map = get_family_alias_map()
+    if family_id in alias_map:
+        mapped = alias_map[family_id]
+        return (mapped, {"field": "family_id", "from": family_id, "to": mapped, "reason": "alias_map"})
+    if allow_experimental:
+        return (family_id, None)
+    return (None, {"field": "family_id", "from": family_id, "to": None, "reason": "unsupported"})
 
 
 def get_family(family_id: str, allow_experimental: bool = False) -> Optional[Dict[str, Any]]:

@@ -55,7 +55,7 @@ PLANNER_MODE: PlannerMode = (
 if PLANNER_MODE not in ("deterministic", "llm", "hybrid"):
     PLANNER_MODE = "deterministic"
 
-PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 PLANNER_TEMPERATURE: float = _env_float("PLANNER_TEMPERATURE", 0.2, 0.0, 2.0)
 PLANNER_MAX_RETRIES: int = _env_int("PLANNER_MAX_RETRIES", 3, 1, 10)
 PLANNER_ALLOW_EXPERIMENTAL_FAMILIES: bool = _env_bool("PLANNER_ALLOW_EXPERIMENTAL_FAMILIES", False)

@@ -133,7 +133,7 @@ export default function HomePage() {
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
   const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>(QUICK_DEMO_CASES_FALLBACK);
   const [plannerMode, setPlannerMode] = useState<string>("deterministic");
-  const [plannerModel, setPlannerModel] = useState("");
+  const [plannerModel, setPlannerModel] = useState("gemini-3-flash-preview");
   const [plannerTemperature, setPlannerTemperature] = useState<number | "">("");
   const [showRawPlannerOutputs, setShowRawPlannerOutputs] = useState(false);
   const [plannerStatus, setPlannerStatus] = useState<PlannerStatusResponse | null>(null);
@@ -505,7 +505,7 @@ export default function HomePage() {
                               type="text"
                               value={plannerModel}
                               onChange={(e) => setPlannerModel(e.target.value)}
-                              placeholder="e.g. gemini-2.0-flash"
+                              placeholder="gemini-3-flash-preview"
                               className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-mono"
                             />
                           </div>

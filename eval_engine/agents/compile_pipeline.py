@@ -50,9 +50,10 @@ def compile_intent_to_plan(
 
     # Intent -> eval_families
     if save_raw_planner_outputs and mode in ("llm", "hybrid"):
-        eval_families, raw_ef = _plan_intent_with_raw(
+        eval_families, raw_ef, norm_warnings = _plan_intent_with_raw(
             intent_spec, mode=mode, planner_model=model, planner_temperature=temperature, allow_experimental=allow_exp
         )
+        warnings.extend(norm_warnings)
         llm_round_trips += 1
     else:
         eval_families = plan_intent(
@@ -61,6 +62,7 @@ def compile_intent_to_plan(
             planner_model=model,
             planner_temperature=temperature,
             allow_experimental=allow_exp,
+            warnings_out=warnings,
         )
 
     # eval_families -> prompt_blueprints
@@ -129,8 +131,8 @@ def _plan_intent_with_raw(
     planner_model: str,
     planner_temperature: float,
     allow_experimental: bool,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Return (eval_families, raw_llm_eval_families). Raw is before hybrid normalization."""
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    """Return (eval_families, raw_llm_eval_families, norm_warnings). Raw is before hybrid normalization."""
     from .intent_planner import _plan_intent_deterministic
     from ..llm.structured import generate_and_validate
     from ..config import require_gemini_key_if_llm
@@ -138,7 +140,7 @@ def _plan_intent_with_raw(
     import json
 
     if mode == "deterministic":
-        return _plan_intent_deterministic(intent_spec), []
+        return _plan_intent_deterministic(intent_spec), [], []
 
     require_gemini_key_if_llm(mode)
     _PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
@@ -151,12 +153,13 @@ def _plan_intent_with_raw(
     )
     if not isinstance(raw_list, list):
         raw_list = []
+    norm_warnings: List[str] = []
     if mode == "hybrid":
         from .intent_planner import _normalize_eval_families_to_catalog
-        eval_families = _normalize_eval_families_to_catalog(raw_list, allow_experimental=allow_experimental)
+        eval_families, norm_warnings = _normalize_eval_families_to_catalog(raw_list, allow_experimental=allow_experimental)
     else:
         eval_families = raw_list
-    return eval_families, raw_list
+    return eval_families, raw_list, norm_warnings
 
 
 def _compile_blueprints_with_raw(

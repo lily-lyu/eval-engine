@@ -213,3 +213,113 @@ def test_raw_planner_artifacts_saved_when_enabled(tmp_path, monkeypatch):
     assert (artifacts_dir / "compiled_plan.json").exists()
     meta = json.loads((artifacts_dir / "planner_metadata.json").read_text())
     assert meta.get("planner_mode") == "deterministic"
+
+
+# ---- Hybrid family normalization (alias map) ----
+
+def test_hybrid_normalizes_near_miss_family_id_trajectory_email_tool():
+    """Hybrid mode: LLM output family_id 'trajectory.email_tool' normalizes to 'trajectory.email_lookup'; compile succeeds."""
+    from eval_engine.agents.intent_planner import _normalize_eval_families_to_catalog
+
+    raw = [
+        {
+            "family_id": "trajectory.email_tool",
+            "family_label": "Email tool",
+            "objective": "Use tool then return email.",
+            "observable_targets": ["email", "trajectory"],
+            "slot_weight": 10,
+            "allowed_eval_methods": ["trajectory_check", "schema_check"],
+            "grounding_mode": "synthetic",
+            "materializer_type": "trajectory_email_then_answer",
+            "materializer_config": {},
+            "dedup_group": "trajectory.email_tool",
+            "failure_taxonomy": [],
+        }
+    ]
+    normalized, warnings = _normalize_eval_families_to_catalog(raw, allow_experimental=False)
+    assert len(normalized) == 1
+    assert normalized[0]["family_id"] == "trajectory.email_lookup"
+    assert any("trajectory.email_tool" in w and "trajectory.email_lookup" in w for w in warnings)
+
+
+def test_hybrid_compile_succeeds_with_trajectory_email_tool_mock(monkeypatch):
+    """Full hybrid compile with mocked LLM returning family_id trajectory.email_tool succeeds."""
+    monkeypatch.setattr("eval_engine.config.GEMINI_API_KEY", "fake-key-for-test")
+    from eval_engine.agents.compile_pipeline import compile_intent_to_plan
+
+    def mock_generate(_p, **kwargs):
+        return json.dumps({
+            "eval_families": [
+                {
+                    "family_id": "trajectory.email_tool",
+                    "family_label": "Email tool",
+                    "objective": "Use tool then return email.",
+                    "observable_targets": ["email", "trajectory"],
+                    "slot_weight": 10,
+                    "allowed_eval_methods": ["trajectory_check", "schema_check"],
+                    "grounding_mode": "synthetic",
+                    "materializer_type": "trajectory_email_then_answer",
+                    "materializer_config": {},
+                    "dedup_group": "trajectory.email_tool",
+                    "failure_taxonomy": [],
+                }
+            ]
+        })
+
+    monkeypatch.setattr("eval_engine.llm.structured.generate", mock_generate)
+    intent = {
+        "intent_name": "hybrid_alias",
+        "intent_spec_version": "1.0.0",
+        "evaluation_goal": "Trajectory email.",
+        "capability_focus": ["trajectory"],
+    }
+    plan = compile_intent_to_plan(intent, planner_mode="hybrid")
+    assert plan["eval_families"][0]["family_id"] == "trajectory.email_lookup"
+    assert "compiled_dataset_spec" in plan
+    assert any("trajectory.email_tool" in w for w in plan["compile_metadata"].get("warnings", []))
+
+
+def test_hybrid_unsupported_family_id_no_alias_raises():
+    """Unsupported family_id with allow_experimental=false and no alias fails with LLM_FAMILY_UNSUPPORTED."""
+    from eval_engine.agents.intent_planner import _normalize_eval_families_to_catalog
+    from eval_engine.core.failure_codes import LLM_FAMILY_UNSUPPORTED
+
+    raw = [
+        {
+            "family_id": "nonexistent.xyz",
+            "family_label": "X",
+            "objective": "O",
+            "observable_targets": ["x"],
+            "slot_weight": 10,
+            "allowed_eval_methods": ["schema_check"],
+            "materializer_type": "json_extract_email",
+        }
+    ]
+    with pytest.raises(ValueError) as exc_info:
+        _normalize_eval_families_to_catalog(raw, allow_experimental=False)
+    assert LLM_FAMILY_UNSUPPORTED in str(exc_info.value)
+
+
+def test_hybrid_exact_supported_family_id_unchanged():
+    """Exact supported family_id 'trajectory.email_lookup' remains unchanged, no failure."""
+    from eval_engine.agents.intent_planner import _normalize_eval_families_to_catalog
+
+    raw = [
+        {
+            "family_id": "trajectory.email_lookup",
+            "family_label": "Email lookup",
+            "objective": "Use search then return email.",
+            "observable_targets": ["email", "trajectory"],
+            "slot_weight": 10,
+            "allowed_eval_methods": ["trajectory_check", "schema_check"],
+            "grounding_mode": "synthetic",
+            "materializer_type": "trajectory_email_then_answer",
+            "materializer_config": {},
+            "dedup_group": "trajectory.email_lookup",
+            "failure_taxonomy": [],
+        }
+    ]
+    normalized, warnings = _normalize_eval_families_to_catalog(raw, allow_experimental=False)
+    assert len(normalized) == 1
+    assert normalized[0]["family_id"] == "trajectory.email_lookup"
+    assert not any("Normalized family_id" in w for w in warnings)
