@@ -88,6 +88,8 @@
       }
     },
 
-    "version_bundle": { "$ref": "version_bundle.schema.json" }
+    "version_bundle": { "$ref": "version_bundle.schema.json" },
+
+    "judge_spec_id": { "type": "string", "minLength": 1, "maxLength": 64 }
   }
 }
