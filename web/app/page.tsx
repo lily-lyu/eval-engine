@@ -238,10 +238,11 @@ export default function HomePage() {
     }
   }
 
-  const geminiUnavailable =
+  const geminiUnavailable = Boolean(
     plannerStatus &&
-    !plannerStatus.gemini_configured &&
-    (plannerMode === "llm" || plannerMode === "hybrid");
+      !plannerStatus.gemini_configured &&
+      (plannerMode === "llm" || plannerMode === "hybrid")
+  );
 
   async function handleFailureDemo() {
     setLoading(true);
