@@ -315,7 +315,7 @@ export default function HomePage() {
 
   async function handleRunCompiledBatch() {
     if (!briefCompileResult?.compiled_dataset_spec) {
-      setError("请先完成方案编译，再运行已编译 Batch。");
+      setError("请先完成方案编译，再运行编译结果。");
       return;
     }
     setLoading(true);
@@ -548,7 +548,7 @@ export default function HomePage() {
                       onChange={(e) => setPlannerMode(e.target.value)}
                       className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm"
                     >
-                      <option value="hybrid">LLM + 确定性（混合）</option>
+                      <option value="hybrid">混合模式（LLM + 确定性）</option>
                     </select>
                   </div>
                   <div>
@@ -562,7 +562,7 @@ export default function HomePage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-neutral-500">Temperature</label>
+                    <label className="mb-1 block text-xs text-neutral-500">Temperature（温度）</label>
                     <input
                       type="number"
                       min={0}
@@ -705,7 +705,7 @@ export default function HomePage() {
                         <p className="mt-1 text-sm text-neutral-300">
                           {(briefCompileResult.compiled_dataset_spec?.capability_targets as unknown[])
                             ?.length ?? 0}{" "}
-                          个 capability targets · dataset:{" "}
+                          个 capability targets · 数据集：{" "}
                           {(briefCompileResult.compiled_dataset_spec?.dataset_name as string) ?? "—"}
                         </p>
                       </div>
@@ -778,7 +778,7 @@ export default function HomePage() {
                           aria-hidden
                         />
                       )}
-                      {loading ? "运行中…" : "运行已编译 Batch"}
+                      {loading ? "运行中…" : "运行编译结果"}
                     </button>
                     <p className="text-xs text-neutral-500">
                       将直接运行上方预览的已编译 dataset spec（运行时不会重新编译）。

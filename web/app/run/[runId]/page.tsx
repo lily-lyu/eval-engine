@@ -138,6 +138,13 @@ type RunsResponse = {
 const TABS = ["overview", "pipeline", "items", "release"] as const;
 type Tab = (typeof TABS)[number];
 
+const TAB_LABELS: Record<Tab, string> = {
+  overview: "总览",
+  pipeline: "流水线",
+  items: "样本",
+  release: "发布",
+};
+
 function tabHref(runId: string, tab: Tab) {
   return `/run/${runId}?tab=${tab}`;
 }
@@ -212,10 +219,10 @@ export default async function RunDetailPage({
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <Link href="/" className="text-sm text-neutral-400 hover:text-neutral-200">
-              ← Back
+              ← 返回
             </Link>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
-              任务控制
+              运行控制台
             </h1>
             <div className="mt-2 text-sm text-neutral-400">
               {[normalizedCurrentRun.dataset_name, normalizedCurrentRun.model_version]
@@ -229,16 +236,16 @@ export default async function RunDetailPage({
 
         <div className="mb-8 grid gap-4 md:grid-cols-4">
           <StatCard
-            label="Pass rate"
+            label="通过率"
             value={formatPassRate(normalizedCurrentRun.pass_rate ?? null)}
           />
           <StatCard
-            label="Failures"
+            label="失败数"
             value={String(normalizedCurrentRun.failures_total ?? 0)}
           />
-          <StatCard label="Items" value={String(normalizedCurrentRun.items_total ?? 0)} />
+          <StatCard label="样本数" value={String(normalizedCurrentRun.items_total ?? 0)} />
           <StatCard
-            label="Release gate"
+            label="发布闸门"
             value={release.gate}
             hint={release.summary}
           />
@@ -255,7 +262,7 @@ export default async function RunDetailPage({
                   : "text-neutral-300 hover:bg-neutral-950"
               }`}
             >
-              {tab}
+              {TAB_LABELS[tab]}
             </Link>
           ))}
         </div>
@@ -349,11 +356,11 @@ export default async function RunDetailPage({
 
         {activeTab === "pipeline" && (
           <div className="space-y-6">
-            <SectionCard title="Agent pipeline">
+            <SectionCard title="Agent 流水线">
               <PipelineStrip stages={stageRows} />
             </SectionCard>
 
-            <SectionCard title="Raw stage events">
+            <SectionCard title="原始阶段事件">
               <JsonBlock data={events} />
             </SectionCard>
           </div>
