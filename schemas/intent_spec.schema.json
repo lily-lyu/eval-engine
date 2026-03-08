@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/intent_spec.schema.json",
+  "title": "intent_spec",
+  "description": "User-facing high-level evaluation intent. Input to the intent planning layer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent_name", "intent_spec_version", "evaluation_goal"],
+  "properties": {
+    "intent_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "intent_spec_version": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "evaluation_goal": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "target_domain": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "capability_focus": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "difficulty_mix": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "easy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "medium": { "type": "number", "minimum": 0, "maximum": 1 },
+        "hard": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expert": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "risk_focus": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "grounding_requirements": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["synthetic", "web_grounded", "image_grounded"] },
+      "minItems": 0,
+      "maxItems": 8
+    },
+    "batch_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "output_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string", "enum": ["json", "text"] },
+        "schema_strict": { "type": "boolean" }
+      }
+    },
+    "hard_rules": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "planner_defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prefer_deterministic_judge": { "type": "boolean" },
+        "allow_experimental_families": { "type": "boolean" },
+        "max_families": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "dataset_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "max_prompt_length": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "max_retries_per_stage": { "type": "integer", "minimum": 0, "maximum": 10 }
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/judge_spec.schema.json",
+  "title": "judge_spec",
+  "description": "Typed intermediate for A1b-like judge compilation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["judge_spec_id", "family_id", "eval_method", "method_justification"],
+  "properties": {
+    "judge_spec_id": { "type": "string", "pattern": "^[a-z0-9_.-]{3,64}$" },
+    "family_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "blueprint_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "eval_method": {
+      "type": "string",
+      "enum": ["programmatic_check", "exact_match", "trajectory_check", "schema_check", "rubric_judge"]
+    },
+    "checker_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "checker_config": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "expected_shape": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "canonicalization_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "from": { "type": "string" }, "to": { "type": "string" } }
+      },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "pass_fail_observables": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "evidence_requirements": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "adjudication_policy": { "type": "string", "minLength": 0, "maxLength": 256 },
+    "failure_taxonomy": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "method_justification": { "type": "string", "minLength": 1, "maxLength": 512 }
+  }
+}

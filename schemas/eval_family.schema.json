@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/eval_family.schema.json",
+  "title": "eval_family",
+  "description": "Controlled eval family from the family catalog or planner output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["family_id", "family_label", "objective", "observable_targets", "slot_weight"],
+  "properties": {
+    "family_id": { "type": "string", "pattern": "^[a-z0-9_.-]{3,64}$" },
+    "family_label": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "observable_targets": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "grounding_mode": {
+      "type": "string",
+      "enum": ["synthetic", "web_grounded", "image_grounded"]
+    },
+    "allowed_eval_methods": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["programmatic_check", "exact_match", "trajectory_check", "schema_check", "rubric_judge"]
+      },
+      "minItems": 1,
+      "maxItems": 8
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["easy", "medium", "hard", "expert"]
+    },
+    "risk_tier": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "slot_weight": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "materializer_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "materializer_config": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "dedup_group": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "failure_taxonomy": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 16
+    }
+  }
+}

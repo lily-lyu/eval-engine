@@ -535,6 +535,60 @@ def _generate_image_grounded_item(
     }
 
 
+def generate_item_from_blueprint(
+    spec: Dict[str, Any],
+    blueprint: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    domain_tags: Optional[List[str]] = None,
+    difficulty: Optional[str] = None,
+    tool_broker: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Generate one eval item from a prompt_blueprint. Dispatches by materializer_type
+    (same as task_type in registry). Compatibility adapter: uses existing task generators.
+    """
+    materializer_type = blueprint.get("materializer_type", "")
+    domain_tags = domain_tags or spec.get("allowed_domain_tags", ["general"])
+    difficulty = difficulty or "easy"
+    target = {
+        "target_id": blueprint.get("blueprint_id", "bp"),
+        "domain_tags": list(domain_tags),
+        "difficulty": difficulty,
+        "task_type": materializer_type,
+        "source_policy": blueprint.get("grounding_recipe", {}).get("mode", "synthetic"),
+    }
+    return generate_item_from_target(spec, target, dataset_spec_version, rng, tool_broker=tool_broker)
+
+
+def materialize_target_to_item(
+    spec: Dict[str, Any],
+    target: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    tool_broker: Optional[Any] = None,
+    blueprint: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate item from target. If blueprint is provided and target has blueprint_id,
+    use generate_item_from_blueprint; otherwise use generate_item_from_target (current behavior).
+    """
+    if blueprint is not None and target.get("blueprint_id"):
+        item = generate_item_from_blueprint(
+            spec,
+            blueprint,
+            dataset_spec_version,
+            rng,
+            domain_tags=target.get("domain_tags"),
+            difficulty=target.get("difficulty"),
+            tool_broker=tool_broker,
+        )
+        if target.get("judge_spec_id"):
+            item["judge_spec_id"] = target["judge_spec_id"]
+        return item
+    return generate_item_from_target(spec, target, dataset_spec_version, rng, tool_broker=tool_broker)
+
+
 def generate_item_from_target(
     spec: Dict[str, Any],
     target: Dict[str, Any],

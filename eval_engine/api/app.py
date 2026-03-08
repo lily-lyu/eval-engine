@@ -50,6 +50,7 @@ from eval_engine.services.artifact_service import (
 )
 from eval_engine.services.job_service import get_job_status as get_job_status_service
 from eval_engine.services.run_service import RunBatchRequest, run_batch_service
+from eval_engine.agents.compile_pipeline import compile_intent_to_plan
 from eval_engine.services.regression_service import (
     RegressionRequest,
     run_regression_service,
@@ -79,12 +80,49 @@ app.include_router(sut_router)
 
 
 class RunBatchRequestSchema(BaseModel):
-    spec_json: str
+    """Either spec_json (dataset_spec) or intent_json (intent_spec); intent_json takes precedence if both set."""
+    spec_json: str | None = None
+    intent_json: str | None = None
     quota: int = 1
     sut: str = "http"
     sut_url: str | None = None
     sut_timeout: int = 30
     model_version: str = "http-sut-local"
+    planner_mode: str | None = None
+    planner_model: str | None = None
+    planner_temperature: float | None = None
+    allow_experimental: bool | None = None
+    save_raw_planner_outputs: bool = False
+
+
+class CompileRequestSchema(BaseModel):
+    intent_json: str
+    planner_mode: str | None = None
+    planner_model: str | None = None
+    planner_temperature: float | None = None
+    allow_experimental: bool | None = None
+    save_raw_planner_outputs: bool = False
+
+
+@app.post("/compile")
+def api_compile(req: CompileRequestSchema) -> dict[str, Any]:
+    """Compile intent_spec to compiled_plan (no run). Returns compiled_plan or 400 with failure code."""
+    try:
+        intent_spec = json.loads(req.intent_json)
+        compiled_plan = compile_intent_to_plan(
+            intent_spec,
+            planner_mode=req.planner_mode,
+            planner_model=req.planner_model,
+            planner_temperature=req.planner_temperature,
+            allow_experimental=req.allow_experimental,
+            save_raw_planner_outputs=req.save_raw_planner_outputs,
+        )
+        return _redact_paths(compiled_plan)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(status_code=400, detail=msg)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
 
 class RegressionRequestSchema(BaseModel):
@@ -114,6 +152,16 @@ def healthz() -> dict[str, Any]:
     return {"ok": True}
 
 
+@app.get("/planner-status")
+def api_planner_status() -> dict[str, Any]:
+    """Return planner mode and whether Gemini is configured (for UI; never exposes API key)."""
+    from eval_engine.config import PLANNER_MODE, GEMINI_API_KEY
+    return {
+        "planner_mode": PLANNER_MODE,
+        "gemini_configured": bool(GEMINI_API_KEY),
+    }
+
+
 @app.get("/runs")
 def api_list_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
     return _redact_paths({"runs": list_runs(limit=limit)})
@@ -121,16 +169,37 @@ def api_list_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any
 
 @app.post("/runs")
 def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
-    spec = json.loads(req.spec_json)
-    request = RunBatchRequest(
-        project_root=get_repo_root(),
-        spec=spec,
-        quota=req.quota,
-        sut_name=req.sut,
-        sut_url=req.sut_url or default_sut_url(),
-        sut_timeout=req.sut_timeout,
-        model_version=req.model_version,
-    )
+    if req.intent_json:
+        intent_spec = json.loads(req.intent_json)
+        spec = {}  # will be replaced by compiled_dataset_spec in service
+        request = RunBatchRequest(
+            project_root=get_repo_root(),
+            spec=spec,
+            quota=req.quota,
+            sut_name=req.sut,
+            sut_url=req.sut_url or default_sut_url(),
+            sut_timeout=req.sut_timeout,
+            model_version=req.model_version,
+            intent_spec=intent_spec,
+            planner_mode=req.planner_mode,
+            planner_model=req.planner_model,
+            planner_temperature=req.planner_temperature,
+            allow_experimental=req.allow_experimental,
+            save_raw_planner_outputs=req.save_raw_planner_outputs,
+        )
+    else:
+        if not req.spec_json:
+            raise HTTPException(status_code=400, detail="Either spec_json or intent_json is required")
+        spec = json.loads(req.spec_json)
+        request = RunBatchRequest(
+            project_root=get_repo_root(),
+            spec=spec,
+            quota=req.quota,
+            sut_name=req.sut,
+            sut_url=req.sut_url or default_sut_url(),
+            sut_timeout=req.sut_timeout,
+            model_version=req.model_version,
+        )
     response = run_batch_service(request)
     return _redact_paths(response.to_dict())
 

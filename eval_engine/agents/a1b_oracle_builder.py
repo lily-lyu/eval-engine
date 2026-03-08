@@ -303,8 +303,45 @@ def build_trajectory_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def build_oracle(item: Dict[str, Any]) -> Dict[str, Any]:
+def build_oracle_from_judge_spec(item: Dict[str, Any], judge_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build oracle from typed judge_spec. Uses task registry to get expected value when possible,
+    then applies judge_spec (eval_method, checker_name, failure_taxonomy, evidence_requirements, etc.).
+    """
     from ..tasks.registry import get_task_registry
+
+    task_type = item.get("task_type", "")
+    registry = get_task_registry()
+    expected = None
+    if task_type in registry:
+        oracle_from_registry = registry[task_type].oracle_builder(item)
+        expected = oracle_from_registry.get("expected")
+    oracle = _oracle_common(
+        item,
+        expected,
+        judge_spec.get("eval_method", "schema_check"),
+        judge_spec.get("method_justification", ""),
+        evidence_requirements=judge_spec.get("evidence_requirements"),
+        checker_name=judge_spec.get("checker_name"),
+        checker_config=judge_spec.get("checker_config"),
+        failure_taxonomy=judge_spec.get("failure_taxonomy"),
+        canonicalization_rules=judge_spec.get("canonicalization_rules"),
+    )
+    oracle["candidate_methods"] = [judge_spec.get("eval_method", "schema_check")]
+    oracle["selection_rationale"] = judge_spec.get("method_justification", "")
+    oracle["rejected_methods"] = []
+    return oracle
+
+
+def build_oracle(
+    item: Dict[str, Any],
+    judge_specs_by_id: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    from ..tasks.registry import get_task_registry
+
+    judge_spec_id = item.get("judge_spec_id")
+    if judge_specs_by_id and judge_spec_id and judge_spec_id in judge_specs_by_id:
+        return build_oracle_from_judge_spec(item, judge_specs_by_id[judge_spec_id])
 
     sel = select_eval_method(item)
     task_type = item.get("task_type", "")

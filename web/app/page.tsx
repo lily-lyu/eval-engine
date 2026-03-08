@@ -90,9 +90,26 @@ const ADVANCED_SPEC_PRESETS = [
 
 const DEFAULT_SPEC = JSON.stringify(SMOKE_SPEC, null, 2);
 
+// —— Intent mode: high-level intent -> compiled plan —————————————————————
+const DEFAULT_INTENT_SPEC = {
+  intent_name: "extraction_and_trajectory",
+  intent_spec_version: "1.0.0",
+  evaluation_goal: "Evaluate email extraction and trajectory tool-use capability.",
+  target_domain: ["extraction", "trajectory"],
+  capability_focus: ["extraction", "trajectory"],
+  batch_size: 4,
+  defaults: { seed: 42, max_prompt_length: 20000, max_retries_per_stage: 2 },
+};
+const DEFAULT_INTENT_JSON = JSON.stringify(DEFAULT_INTENT_SPEC, null, 2);
+
 type ClustersResponse = {
   content?: { clusters: Array<{ error_type: string }> };
   error?: unknown;
+};
+
+type PlannerStatusResponse = {
+  planner_mode: string;
+  gemini_configured: boolean;
 };
 
 export default function HomePage() {
@@ -101,6 +118,10 @@ export default function HomePage() {
   const [specJson, setSpecJson] = useState(DEFAULT_SPEC);
   const [specPreset, setSpecPreset] = useState<string>("smoke_template");
   const [advancedJsonOpen, setAdvancedJsonOpen] = useState(false);
+  const [advancedMode, setAdvancedMode] = useState<"custom_json" | "intent">("custom_json");
+  const [intentJson, setIntentJson] = useState(DEFAULT_INTENT_JSON);
+  const [compilePreview, setCompilePreview] = useState<Record<string, unknown> | null>(null);
+  const [compileError, setCompileError] = useState("");
   const [runtimeOptionsOpen, setRuntimeOptionsOpen] = useState(false);
   const [runSectionMode, setRunSectionMode] = useState<"quick" | "advanced">("quick");
   const [sutUrl, setSutUrl] = useState(`${API_BASE}/sut/run`);
@@ -111,6 +132,11 @@ export default function HomePage() {
   const [latestRunId, setLatestRunId] = useState("");
   const [latestFailedCluster, setLatestFailedCluster] = useState<string | null>(null);
   const [demoCases, setDemoCases] = useState<Array<{ value: string; label: string }>>(QUICK_DEMO_CASES_FALLBACK);
+  const [plannerMode, setPlannerMode] = useState<string>("deterministic");
+  const [plannerModel, setPlannerModel] = useState("");
+  const [plannerTemperature, setPlannerTemperature] = useState<number | "">("");
+  const [showRawPlannerOutputs, setShowRawPlannerOutputs] = useState(false);
+  const [plannerStatus, setPlannerStatus] = useState<PlannerStatusResponse | null>(null);
 
   const loadDemoCases = useCallback(async () => {
     try {
@@ -138,6 +164,12 @@ export default function HomePage() {
     loadDemoCases();
   }, [loadDemoCases]);
 
+  useEffect(() => {
+    apiGet<PlannerStatusResponse>("/planner-status")
+      .then(setPlannerStatus)
+      .catch(() => setPlannerStatus(null));
+  }, []);
+
   // Fetch latest failed cluster from most recent run that has failures
   useEffect(() => {
     const failedRun = runs.find((r) => r.failures_total > 0);
@@ -161,14 +193,23 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiPost<RunCreateResponse>("/runs", {
-        spec_json: specJson,
+      const body: Record<string, unknown> = {
         quota,
         sut: "http",
         sut_url: sutUrl,
         sut_timeout: 30,
         model_version: "http-sut-local",
-      });
+      };
+      if (advancedMode === "intent") {
+        body.intent_json = intentJson;
+        body.planner_mode = plannerMode;
+        if (plannerModel) body.planner_model = plannerModel;
+        if (plannerTemperature !== "") body.planner_temperature = Number(plannerTemperature);
+        body.save_raw_planner_outputs = showRawPlannerOutputs;
+      } else {
+        body.spec_json = specJson;
+      }
+      const res = await apiPost<RunCreateResponse>("/runs", body);
       setLatestRunId(res.run_id);
       await loadRuns();
       router.push(`/run/${res.run_id}`);
@@ -178,6 +219,29 @@ export default function HomePage() {
       setLoading(false);
     }
   }
+
+  async function handleCompilePreview() {
+    setCompileError("");
+    setCompilePreview(null);
+    try {
+      const body: Record<string, unknown> = {
+        intent_json: intentJson,
+        planner_mode: plannerMode,
+        save_raw_planner_outputs: showRawPlannerOutputs,
+      };
+      if (plannerModel) body.planner_model = plannerModel;
+      if (plannerTemperature !== "") body.planner_temperature = Number(plannerTemperature);
+      const res = await apiPost<Record<string, unknown>>("/compile", body);
+      setCompilePreview(res);
+    } catch (err) {
+      setCompileError(err instanceof Error ? err.message : "Compile failed");
+    }
+  }
+
+  const geminiUnavailable =
+    plannerStatus &&
+    !plannerStatus.gemini_configured &&
+    (plannerMode === "llm" || plannerMode === "hybrid");
 
   async function handleFailureDemo() {
     setLoading(true);
@@ -345,47 +409,190 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm text-neutral-300">Dataset template</label>
-                  <select
-                    value={specPreset}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setSpecPreset(v);
-                      const preset = ADVANCED_SPEC_PRESETS.find((p) => p.value === v);
-                      if (preset?.spec) setSpecJson(JSON.stringify(preset.spec, null, 2));
-                      if (v === "custom") setAdvancedJsonOpen(true);
-                    }}
-                    className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-                  >
-                    {ADVANCED_SPEC_PRESETS.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="mb-2 block text-sm text-neutral-300">Advanced input</label>
+                  <div className="mb-2 flex gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedMode("custom_json")}
+                      className={`flex-1 rounded-xl px-3 py-2 text-sm ${
+                        advancedMode === "custom_json"
+                          ? "bg-white text-black"
+                          : "text-neutral-400 hover:bg-neutral-900"
+                      }`}
+                    >
+                      Custom JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedMode("intent")}
+                      className={`flex-1 rounded-xl px-3 py-2 text-sm ${
+                        advancedMode === "intent"
+                          ? "bg-white text-black"
+                          : "text-neutral-400 hover:bg-neutral-900"
+                      }`}
+                    >
+                      Intent
+                    </button>
+                  </div>
                 </div>
 
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setAdvancedJsonOpen((o) => !o)}
-                    className="text-sm text-neutral-400 underline hover:text-neutral-300"
-                  >
-                    {advancedJsonOpen ? "▼" : "▶"} Custom JSON
-                  </button>
-                  {advancedJsonOpen && (
+                {advancedMode === "custom_json" ? (
+                  <>
+                    <div>
+                      <label className="mb-2 block text-sm text-neutral-300">Dataset template</label>
+                      <select
+                        value={specPreset}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSpecPreset(v);
+                          const preset = ADVANCED_SPEC_PRESETS.find((p) => p.value === v);
+                          if (preset?.spec) setSpecJson(JSON.stringify(preset.spec, null, 2));
+                          if (v === "custom") setAdvancedJsonOpen(true);
+                        }}
+                        className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+                      >
+                        {ADVANCED_SPEC_PRESETS.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setAdvancedJsonOpen((o) => !o)}
+                        className="text-sm text-neutral-400 underline hover:text-neutral-300"
+                      >
+                        {advancedJsonOpen ? "▼" : "▶"} Custom JSON
+                      </button>
+                      {advancedJsonOpen && (
+                        <textarea
+                          value={specJson}
+                          onChange={(e) => {
+                            setSpecJson(e.target.value);
+                            setSpecPreset("custom");
+                          }}
+                          className="mt-3 h-48 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
+                        />
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-neutral-400">
+                      System-level intent: capability_focus (e.g. extraction, trajectory) is compiled into eval families and then into dataset_spec.
+                    </p>
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="mb-1 block text-sm text-neutral-300">Planner mode</label>
+                        <select
+                          value={plannerMode}
+                          onChange={(e) => setPlannerMode(e.target.value)}
+                          className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+                        >
+                          <option value="deterministic">Deterministic (catalog only)</option>
+                          <option value="llm">LLM (Gemini)</option>
+                          <option value="hybrid">Hybrid (Gemini + normalize)</option>
+                        </select>
+                      </div>
+                      {(plannerMode === "llm" || plannerMode === "hybrid") && (
+                        <>
+                          <div>
+                            <label className="mb-1 block text-sm text-neutral-300">Model (optional)</label>
+                            <input
+                              type="text"
+                              value={plannerModel}
+                              onChange={(e) => setPlannerModel(e.target.value)}
+                              placeholder="e.g. gemini-2.0-flash"
+                              className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-sm text-neutral-300">Temperature (optional)</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={2}
+                              step={0.1}
+                              value={plannerTemperature === "" ? "" : plannerTemperature}
+                              onChange={(e) =>
+                                setPlannerTemperature(e.target.value === "" ? "" : Number(e.target.value))
+                              }
+                              placeholder="0.2"
+                              className="w-32 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          {geminiUnavailable && (
+                            <p className="text-sm text-amber-400">
+                              Gemini planner is not configured on the backend (missing GEMINI_API_KEY). Use deterministic mode or set GEMINI_API_KEY on the server.
+                            </p>
+                          )}
+                        </>
+                      )}
+                      <label className="flex items-center gap-2 text-sm text-neutral-400">
+                        <input
+                          type="checkbox"
+                          checked={showRawPlannerOutputs}
+                          onChange={(e) => setShowRawPlannerOutputs(e.target.checked)}
+                          className="rounded border-neutral-700"
+                        />
+                        Show raw planner outputs (when available)
+                      </label>
+                    </div>
                     <textarea
-                      value={specJson}
-                      onChange={(e) => {
-                        setSpecJson(e.target.value);
-                        setSpecPreset("custom");
-                      }}
-                      className="mt-3 h-48 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
+                      value={intentJson}
+                      onChange={(e) => setIntentJson(e.target.value)}
+                      className="mt-2 h-48 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm"
+                      placeholder={DEFAULT_INTENT_JSON}
                     />
-                  )}
-                </div>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCompilePreview}
+                        disabled={geminiUnavailable}
+                        className="rounded-xl border border-neutral-700 px-3 py-2 text-sm text-neutral-200 disabled:opacity-50"
+                      >
+                        Preview compile
+                      </button>
+                      {compileError && (
+                        <span className="self-center text-sm text-red-400">{compileError}</span>
+                      )}
+                    </div>
+                    {compilePreview && (
+                      <div className="mt-3 rounded-xl border border-neutral-700 bg-neutral-900/50 p-3">
+                        <div className="mb-2 text-sm font-medium text-neutral-300">
+                          Compiled plan (preview)
+                        </div>
+                        <pre className="max-h-64 overflow-auto text-xs text-neutral-400">
+                          {JSON.stringify(
+                            (() => {
+                              const meta = (compilePreview.compile_metadata || {}) as Record<string, unknown>;
+                              const base = {
+                                compile_metadata: showRawPlannerOutputs
+                                  ? meta
+                                  : {
+                                      ...meta,
+                                      raw_llm_eval_families: undefined,
+                                      raw_llm_prompt_blueprints: undefined,
+                                      raw_llm_judge_specs: undefined,
+                                      planner_critic_report: undefined,
+                                    },
+                                eval_families_count: (compilePreview.eval_families as unknown[])?.length,
+                                compiled_dataset_spec: compilePreview.compiled_dataset_spec,
+                              };
+                              return base;
+                            })(),
+                            null,
+                            2
+                          )}
+                        </pre>
+                      </div>
+                    )}
+                  </>
+                )}
 
-                <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                   <div>
                     <label className="mb-2 block text-sm text-neutral-300">Quota</label>
                     <input
@@ -400,7 +607,7 @@ export default function HomePage() {
                   <div className="flex items-end pb-1">
                     <button
                       onClick={handleRunBatch}
-                      disabled={loading}
+                      disabled={loading || (advancedMode === "intent" && geminiUnavailable)}
                       className="rounded-xl bg-white px-4 py-2 text-black disabled:opacity-50"
                     >
                       {loading ? "Running..." : "Run Batch"}

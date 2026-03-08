@@ -18,7 +18,7 @@
     "item_id": { "type": "string" },
     "agent_id": {
       "type": "string",
-      "enum": ["A0", "A1", "A1b", "A2", "A3", "A4", "A5", "A6"]
+      "enum": ["A0", "A1", "A1b", "A2", "A3", "A4", "A5", "A6", "INTENT_PLANNER", "PROMPT_COMPILER", "JUDGE_PLANNER", "COMPILER"]
     },
     "stage": { "type": "string" },
     "status": { "type": "string", "enum": ["start", "ok", "fail"] },

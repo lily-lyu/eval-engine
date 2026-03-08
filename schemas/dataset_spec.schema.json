@@ -32,6 +32,11 @@
         "required": ["target_id", "domain_tags", "difficulty", "task_type", "quota_weight"],
         "properties": {
           "target_id": { "type": "string", "pattern": "^[a-z0-9_\\-]{3,64}$" },
+          "family_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "blueprint_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "judge_spec_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "materializer_config": { "type": "object", "additionalProperties": true },
+          "family_config": { "type": "object", "additionalProperties": true },
           "domain_tags": {
             "type": "array",
             "items": { "type": "string", "minLength": 1, "maxLength": 64 },

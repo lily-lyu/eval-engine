@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/prompt_blueprint.schema.json",
+  "title": "prompt_blueprint",
+  "description": "Typed intermediate for A1-like generation; not final concrete prompts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["blueprint_id", "family_id", "blueprint_type"],
+  "properties": {
+    "blueprint_id": { "type": "string", "pattern": "^[a-z0-9_.-]{3,64}$" },
+    "family_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "blueprint_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "instruction_template": { "type": "string", "minLength": 0, "maxLength": 8192 },
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "variation_axes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "grounding_recipe": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "negative_constraints": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "dedup_fingerprint_fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "materializer_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "materializer_config": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

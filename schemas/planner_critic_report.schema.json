@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/planner_critic_report.schema.json",
+  "title": "planner_critic_report",
+  "description": "Structured critique of proposed eval_families, prompt_blueprints, judge_specs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["critic_report"],
+  "properties": {
+    "critic_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issues", "summary", "passed"],
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "code", "message", "location"],
+            "properties": {
+              "severity": { "type": "string", "enum": ["error", "warning"] },
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "location": { "type": "string", "minLength": 0, "maxLength": 128 }
+            }
+          }
+        },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  }
+}

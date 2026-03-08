@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/compiled_plan.schema.json",
+  "title": "compiled_plan",
+  "description": "Top-level compiled artifact: intent + families + blueprints + judges + dataset_spec.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent_spec", "eval_families", "prompt_blueprints", "judge_specs", "compiled_dataset_spec", "compile_metadata"],
+  "properties": {
+    "intent_spec": { "type": "object", "additionalProperties": true },
+    "eval_families": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "prompt_blueprints": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "judge_specs": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "compiled_dataset_spec": { "type": "object", "additionalProperties": true },
+    "compile_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent_spec_version", "family_catalog_version", "compiler_version", "compiled_at"],
+      "properties": {
+        "intent_spec_version": { "type": "string" },
+        "family_catalog_version": { "type": "string" },
+        "blueprint_schema_version": { "type": "string" },
+        "judge_spec_schema_version": { "type": "string" },
+        "planner_version": { "type": "string" },
+        "compiler_version": { "type": "string" },
+        "compiled_at": { "type": "string" },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "planner_mode": { "type": "string" },
+        "planner_model": { "type": "string" },
+        "planner_temperature": { "type": "number" },
+        "fallback_used": { "type": "boolean" },
+        "llm_round_trips": { "type": "integer" },
+        "raw_llm_eval_families": { "type": "array", "items": { "type": "object" } },
+        "raw_llm_prompt_blueprints": { "type": "array", "items": { "type": "object" } },
+        "raw_llm_judge_specs": { "type": "array", "items": { "type": "object" } },
+        "planner_critic_report": { "type": "object" }
+      }
+    }
+  }
+}
