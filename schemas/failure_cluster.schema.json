@@ -33,6 +33,13 @@
     },
     "task_type": { "type": "string", "minLength": 0, "maxLength": 128 },
     "evidence_code": { "type": "string", "minLength": 0, "maxLength": 128 },
-    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 }
+    "eval_method": { "type": "string", "minLength": 0, "maxLength": 64 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Human-readable summary from A3 analyst" },
+    "evidence_examples": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 0, "maxLength": 2000 },
+      "minItems": 0,
+      "maxItems": 20
+    }
   }
 }

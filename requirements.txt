@@ -4,5 +4,5 @@ uvicorn>=0.22.0
 pytest>=7.0.0
 # Official MCP Python SDK (includes FastMCP); optional: mcp[cli] for dev tools
 mcp>=1.0.0
-# Gemini planner (v2); optional for deterministic-only deployment
-google-generativeai>=0.8.0
+# Gemini API; optional for deterministic-only deployment. Use google-genai (new SDK).
+google-genai>=1.0.0

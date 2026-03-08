@@ -1,7 +1,9 @@
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..config import MAX_LLM_RETRIES_PER_STAGE
 from ..core.failure_codes import (
     EXACT_MATCH_FAILED,
     MODEL_OUTPUT_NOT_JSON,
@@ -9,6 +11,7 @@ from ..core.failure_codes import (
     PROGRAMMATIC_CHECK_FAILED,
     TRAJECTORY_CHECK_FAILED,
     RUBRIC_JUDGE_FAILED,
+    JUDGE_SYSTEM_ERROR,
     EVAL_METHOD_UNSUPPORTED,
 )
 from ..core.timeutil import now_iso
@@ -16,8 +19,13 @@ from ..eval_methods.schema_check import run_schema_check
 from ..eval_methods.exact_match import run_exact_match
 from ..eval_methods.trajectory_check import run_trajectory_check
 from ..eval_methods.rubric_judge import run_rubric_judge
+from ..llm.structured import generate_and_validate_pydantic
+from ..llm.worker_schemas import A2JudgeOutput
 from ..tasks.registry import CHECKER_REGISTRY
 from ..core.storage import write_json
+
+logger = logging.getLogger(__name__)
+_PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
 
 
 def _ladder_entry(method: str, ran: bool, passed: bool, reason: str = "") -> Dict[str, Any]:
@@ -218,6 +226,72 @@ def _verify_trajectory(
     )
 
 
+def _run_llm_rubric_judge(
+    item: Dict[str, Any],
+    plan: Dict[str, Any],
+    parsed: Any,
+    raw_ref: Dict[str, Any],
+    model_version: str,
+    seed: int,
+    task_type: str,
+    eval_method: str,
+    run_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Run rubric judge via LLM (schema-first). Uses generate_and_validate_pydantic with A2JudgeOutput.
+    On validation failure after retries, returns a graceful failure eval_result (fail, JUDGE_SYSTEM_ERROR).
+    """
+    oracle = plan.get("oracle") or {}
+    rubric_schema = oracle.get("rubric_schema_version") or "v1"
+    evidence_requirements = oracle.get("evidence_requirements") or {}
+    template = (_PROMPT_DIR / "a2_judge.md").read_text(encoding="utf-8")
+    payload = {
+        "rubric_schema": rubric_schema,
+        "evidence_requirements": evidence_requirements,
+        "model_output": parsed,
+    }
+    prompt = template + "\n\n## Input\n\n```json\n" + json.dumps(payload, indent=2) + "\n```\n\nOutput only the JSON object with the five keys."
+    max_retries = int(run_config.get("max_llm_retries_per_stage", MAX_LLM_RETRIES_PER_STAGE))
+    try:
+        llm_out = generate_and_validate_pydantic(prompt, A2JudgeOutput, max_retries=max_retries)
+    except Exception as e:
+        logger.warning("A2 LLM rubric judge failed after retries, returning graceful failure: %s", e)
+        ladder = [_ladder_entry("rubric_judge", ran=True, passed=False, reason="LLM judge schema validation failed")]
+        return _result(
+            item["item_id"],
+            "fail",
+            0.0,
+            JUDGE_SYSTEM_ERROR,
+            [{"kind": "rubric_judge", "code": "JUDGE_SYSTEM_ERROR", "message": "LLM judge failed to return valid schema after retries."}],
+            raw_ref,
+            model_version,
+            seed,
+            task_type,
+            eval_method,
+            verification_ladder=ladder,
+        )
+    verdict_lower = "pass" if llm_out.verdict == "PASS" else "fail"
+    error_type = "" if llm_out.verdict == "PASS" else (llm_out.error_type or (JUDGE_SYSTEM_ERROR if llm_out.verdict == "ERROR" else RUBRIC_JUDGE_FAILED))
+    evidence_list = [{"kind": "rubric_judge", "message": s} for s in (llm_out.evidence or [])]
+    if not evidence_list and llm_out.verdict != "PASS":
+        evidence_list = [{"kind": "rubric_judge", "message": f"verdict={llm_out.verdict} score={llm_out.score}"}]
+    reason = f"verdict={llm_out.verdict} score={llm_out.score} confidence={llm_out.confidence}"
+    ladder = [_ladder_entry("rubric_judge", ran=True, passed=(llm_out.verdict == "PASS"), reason=reason[:500])]
+    return _result(
+        item["item_id"],
+        verdict_lower,
+        float(llm_out.score),
+        error_type,
+        evidence_list[:10],
+        raw_ref,
+        model_version,
+        seed,
+        task_type,
+        eval_method,
+        verification_ladder=ladder,
+    )
+
+
 def _verify_rubric(
     item: Dict[str, Any],
     plan: Dict[str, Any],
@@ -266,7 +340,14 @@ def verify(
     raw_output_ref: Dict[str, Any],
     tool_trace: Optional[list] = None,
     artifacts_dir: Optional[Path] = None,
+    run_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """
+    Run verification for one item. When eval_method is rubric_judge and run_config
+    has judge_mode in ('hybrid', 'llm_materialized'), uses LLM judge; otherwise
+    uses deterministic/stub path. Pass run_config=spec.get('run_config') from the
+    orchestrator to enable the LLM rubric judge.
+    """
     output_schema = item["output_schema"]
     raw_ref = {
         "sha256": raw_output_ref["sha256"],
@@ -312,7 +393,15 @@ def verify(
         return {**res, "verification_ladder": ladder + res.get("verification_ladder", [])}
 
     if method == "rubric_judge":
-        res = _verify_rubric(item, plan, parsed, raw_ref, model_version, seed, item.get("task_type", ""), method, artifacts_dir)
+        judge_mode = (run_config or {}).get("judge_mode") or "deterministic"
+        judge_mode = judge_mode.strip().lower() if isinstance(judge_mode, str) else "deterministic"
+        if judge_mode in ("hybrid", "llm_materialized"):
+            res = _run_llm_rubric_judge(
+                item, plan, parsed, raw_ref, model_version, seed,
+                item.get("task_type", ""), method, run_config or {},
+            )
+        else:
+            res = _verify_rubric(item, plan, parsed, raw_ref, model_version, seed, item.get("task_type", ""), method, artifacts_dir)
         return {**res, "verification_ladder": ladder + res.get("verification_ladder", [])}
 
     # unit_test and any other method: not implemented; deterministic-first, no half-real methods

@@ -94,6 +94,10 @@ class RunBatchRequestSchema(BaseModel):
     planner_temperature: float | None = None
     allow_experimental: bool | None = None
     save_raw_planner_outputs: bool = False
+    item_generation_mode: str | None = None
+    judge_mode: str | None = None
+    diagnoser_mode: str | None = None
+    max_llm_retries_per_stage: int | None = None
 
 
 class CompileRequestSchema(BaseModel):
@@ -241,6 +245,10 @@ def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
             planner_temperature=req.planner_temperature,
             allow_experimental=req.allow_experimental,
             save_raw_planner_outputs=req.save_raw_planner_outputs,
+            item_generation_mode=req.item_generation_mode,
+            judge_mode=req.judge_mode,
+            diagnoser_mode=req.diagnoser_mode,
+            max_llm_retries_per_stage=req.max_llm_retries_per_stage,
         )
     else:
         if not req.spec_json:
@@ -257,6 +265,10 @@ def api_run_batch(req: RunBatchRequestSchema) -> dict[str, Any]:
             sut_url=req.sut_url or default_sut_url(),
             sut_timeout=req.sut_timeout,
             model_version=req.model_version,
+            item_generation_mode=req.item_generation_mode,
+            judge_mode=req.judge_mode,
+            diagnoser_mode=req.diagnoser_mode,
+            max_llm_retries_per_stage=req.max_llm_retries_per_stage,
         )
     response = run_batch_service(request)
     return _redact_paths(response.to_dict())

@@ -351,7 +351,7 @@ def run_batch(
 
             # VERIFY
             append_jsonl(events_path, [_event(run_id, "VERIFY", "start", item_id=item["item_id"], message=f"eval_method={oracle['eval_method']}")])
-            er = verify(item, oracle, raw_output, model_version=item_model_version, seed=seed, raw_output_ref=raw_ref, tool_trace=tool_trace, artifacts_dir=artifacts_dir)
+            er = verify(item, oracle, raw_output, model_version=item_model_version, seed=seed, raw_output_ref=raw_ref, tool_trace=tool_trace, artifacts_dir=artifacts_dir, run_config=spec.get("run_config"))
             er["version_bundle"] = build_version_bundle(spec, item_model_version, tool_snapshot_hash, seed)
             validate_or_raise("eval_result.schema.json", er)
 
@@ -393,7 +393,7 @@ def run_batch(
 
     # DIAGNOSE
     append_jsonl(events_path, [_event(run_id, "DIAGNOSE", "start", message="batch diagnosis")])
-    clusters, action_plans = diagnose(eval_results)
+    clusters, action_plans = diagnose(eval_results, run_config=spec.get("run_config"))
     append_jsonl(events_path, [_event(run_id, "DIAGNOSE", "ok", message=f"clusters={len(clusters)} plans={len(action_plans)}")])
     clusters_ref = save_artifact_json(artifacts_dir, "batch_a3_clusters.json", clusters)
     action_plans_ref = save_artifact_json(artifacts_dir, "batch_a3_action_plans.json", action_plans)

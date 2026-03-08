@@ -1,8 +1,16 @@
+import logging
 import random
 import string
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..config import MAX_LLM_RETRIES_PER_STAGE
 from ..core.timeutil import now_iso
+from ..llm.structured import generate_and_validate_pydantic
+from ..llm.worker_schemas import A1CreativeOutput, A1JobSpec
+
+logger = logging.getLogger(__name__)
+_PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
 
 
 def _rand_id(prefix: str, rng: random.Random) -> str:
@@ -833,6 +841,58 @@ def generate_item_from_blueprint(
     return generate_item_from_target(spec, target, dataset_spec_version, rng, tool_broker=tool_broker)
 
 
+def _materialize_via_llm(
+    spec: Dict[str, Any],
+    target: Dict[str, Any],
+    dataset_spec_version: str,
+    rng: random.Random,
+    blueprint: Dict[str, Any],
+    run_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Materialize one eval item via LLM (schema-first). Returns full item dict.
+    Merges LLM creative fields with deterministic administrative fields from blueprint/target.
+    Raises on parse/validation failure or after exhausting max_llm_retries_per_stage.
+    """
+    job_spec = A1JobSpec(
+        prompt_blueprint=blueprint,
+        capability_target=target,
+        dataset_spec_version=dataset_spec_version,
+        repetition_index=int(target.get("repetition_index", 0)),
+    )
+    template = (_PROMPT_DIR / "a1_materializer.md").read_text(encoding="utf-8")
+    prompt = template + "\n\n## Input\n\n```json\n" + job_spec.model_dump_json(indent=2) + "\n```\n\nOutput only the JSON object with the six creative fields."
+    max_retries = int(run_config.get("max_llm_retries_per_stage", MAX_LLM_RETRIES_PER_STAGE))
+    creative = generate_and_validate_pydantic(prompt, A1CreativeOutput, max_retries=max_retries)
+
+    # Administrative fields from blueprint/target (not from LLM)
+    domain_tags = target.get("domain_tags") or list(spec.get("allowed_domain_tags", ["general"]))
+    task_type = target.get("task_type") or blueprint.get("materializer_type", "")
+    grounding = blueprint.get("grounding_recipe") or {}
+    source = grounding.get("mode", "synthetic") or "synthetic"
+
+    item: Dict[str, Any] = {
+        "item_id": _rand_id("item", rng),
+        "dataset_spec_version": dataset_spec_version,
+        "domain_tags": domain_tags,
+        "difficulty": creative.difficulty,
+        "task_type": task_type,
+        "prompt": creative.prompt,
+        "input": creative.input,
+        "input_schema": creative.input_schema,
+        "output_schema": creative.output_schema,
+        "constraints": creative.constraints.model_dump(),
+        "provenance": {
+            "created_at": now_iso(),
+            "created_by": "A1",
+            "source": source,
+        },
+    }
+    if target.get("judge_spec_id"):
+        item["judge_spec_id"] = target["judge_spec_id"]
+    return item
+
+
 def materialize_target_to_item(
     spec: Dict[str, Any],
     target: Dict[str, Any],
@@ -845,8 +905,23 @@ def materialize_target_to_item(
     Generate item from target. If blueprint is provided and target has blueprint_id,
     enrich target with blueprint_id, family_id, materializer_config and call generate_item_from_target
     so materializers can consume blueprint variation.
+    When run_config.item_generation_mode is hybrid or llm_materialized, tries LLM materializer first;
+    on validation/retry exhaustion, falls back to deterministic path (fail closed).
     """
     if blueprint is not None and target.get("blueprint_id"):
+        run_config = spec.get("run_config") or {}
+        mode = (run_config.get("item_generation_mode") or "deterministic").strip().lower()
+        if mode in ("hybrid", "llm_materialized"):
+            try:
+                return _materialize_via_llm(
+                    spec, target, dataset_spec_version, rng, blueprint, run_config
+                )
+            except Exception as e:
+                logger.warning(
+                    "A1 LLM materializer failed, falling back to deterministic: %s",
+                    e,
+                    exc_info=False,
+                )
         full_target = {
             **target,
             "blueprint_id": blueprint.get("blueprint_id", ""),

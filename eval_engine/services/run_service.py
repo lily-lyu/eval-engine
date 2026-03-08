@@ -9,8 +9,26 @@ from typing import Any, Dict, Optional
 
 from ..agents.a0_orchestrator import run_batch
 from ..agents.compile_pipeline import compile_intent_to_plan
+from ..config import MAX_LLM_RETRIES_PER_STAGE
 from ..core.job_store import create_job, update_job
 from ..core.storage import save_artifact_json, ensure_dir
+
+_WORKER_MODES = frozenset({"deterministic", "hybrid", "llm_materialized"})
+
+
+def _merge_run_config_into_spec(spec: Dict[str, Any], request: RunBatchRequest) -> None:
+    """Merge request run_config fields into spec so A1/A2/A3 read them without A0 changes."""
+    run_config = spec.setdefault("run_config", {})
+    if request.item_generation_mode is not None and request.item_generation_mode.strip().lower() in _WORKER_MODES:
+        run_config["item_generation_mode"] = request.item_generation_mode.strip().lower()
+    if request.judge_mode is not None and request.judge_mode.strip().lower() in _WORKER_MODES:
+        run_config["judge_mode"] = request.judge_mode.strip().lower()
+    if request.diagnoser_mode is not None and request.diagnoser_mode.strip().lower() in _WORKER_MODES:
+        run_config["diagnoser_mode"] = request.diagnoser_mode.strip().lower()
+    if request.max_llm_retries_per_stage is not None and 0 <= request.max_llm_retries_per_stage <= 10:
+        run_config["max_llm_retries_per_stage"] = request.max_llm_retries_per_stage
+    elif "max_llm_retries_per_stage" not in run_config:
+        run_config["max_llm_retries_per_stage"] = MAX_LLM_RETRIES_PER_STAGE
 
 
 class RunBatchRequest:
@@ -31,6 +49,10 @@ class RunBatchRequest:
         planner_temperature: Optional[float] = None,
         allow_experimental: Optional[bool] = None,
         save_raw_planner_outputs: bool = False,
+        item_generation_mode: Optional[str] = None,
+        judge_mode: Optional[str] = None,
+        diagnoser_mode: Optional[str] = None,
+        max_llm_retries_per_stage: Optional[int] = None,
     ):
         self.project_root = Path(project_root)
         self.spec = spec
@@ -45,6 +67,10 @@ class RunBatchRequest:
         self.planner_temperature = planner_temperature
         self.allow_experimental = allow_experimental
         self.save_raw_planner_outputs = save_raw_planner_outputs
+        self.item_generation_mode = item_generation_mode
+        self.judge_mode = judge_mode
+        self.diagnoser_mode = diagnoser_mode
+        self.max_llm_retries_per_stage = max_llm_retries_per_stage
 
 
 class RunBatchResponse:
@@ -105,6 +131,9 @@ def run_batch_service(request: RunBatchRequest) -> RunBatchResponse:
         except Exception as e:
             update_job(project_root, job_id, status="failed", error_message=str(e))
             raise
+
+    # Merge run-level worker config into spec so A1/A2/A3 can read it (A0 unchanged)
+    _merge_run_config_into_spec(spec, request)
 
     def progress_callback(event: str, **kwargs: Any) -> None:
         if event == "started":

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
+
+from pydantic import BaseModel, ValidationError
 
 from ..config import PLANNER_MAX_RETRIES
 from ..core.failure_codes import (
@@ -15,6 +17,8 @@ from ..core.failure_codes import (
 )
 from ..core.schema import validate_or_raise
 from .gemini_client import generate
+
+T = TypeVar("T", bound=BaseModel)
 
 
 def _extract_json_block(text: str) -> str | None:
@@ -181,3 +185,43 @@ def generate_object_and_validate(
             f"{LLM_SCHEMA_NONCOMPLIANT}: expected single object, got array of length {len(out)}"
         )
     return out
+
+
+def generate_and_validate_pydantic(
+    prompt: str,
+    model_class: type[T],
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_retries: int,
+) -> T:
+    """
+    Call Gemini with prompt, parse response as JSON, validate with Pydantic model.
+    Retries up to max_retries on parse or validation failure. Uses max_retries natively
+    (e.g. max_llm_retries_per_stage). Returns validated model instance.
+    Raises ValueError with LLM_* failure code after exhausting retries.
+    """
+    last_error: ValueError | ValidationError | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            raw = generate(prompt, model=model, temperature=temperature)
+            data = _parse_json(raw)
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f"{LLM_RESPONSE_NOT_JSON}: expected JSON object, got {type(data).__name__}"
+                )
+            return model_class.model_validate(data)
+        except (ValueError, ValidationError) as e:
+            last_error = e
+            if attempt == max_retries:
+                if isinstance(e, ValidationError):
+                    raise ValueError(
+                        f"{LLM_SCHEMA_NONCOMPLIANT}: Pydantic validation failed after {max_retries + 1} attempts: {e}"
+                    ) from e
+                raise ValueError(
+                    f"{LLM_OUTPUT_REPAIR_EXHAUSTED}: could not obtain valid output after {max_retries + 1} attempts: {e}"
+                ) from e
+            continue
+    raise last_error or ValueError(
+        f"{LLM_OUTPUT_REPAIR_EXHAUSTED}: exceeded max_retries={max_retries}"
+    )

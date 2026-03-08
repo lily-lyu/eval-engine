@@ -11,8 +11,20 @@ Heuristics (recommended_owner):
   Other TRAJECTORY + code → data
   Future: high QA rejection rate in one slice → data / dataset spec (needs QA stats input).
 """
+from __future__ import annotations
+
+import json
+import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from ..config import MAX_LLM_RETRIES_PER_STAGE
+from ..llm.structured import generate_and_validate_pydantic
+from ..llm.worker_schemas import A3AnalystReport
+
+logger = logging.getLogger(__name__)
+_PROMPT_DIR = Path(__file__).resolve().parents[1] / "llm" / "prompts"
 
 # Evidence code prefixes / values for heuristic routing
 TOOL_ARGS_PREFIX = "TOOL_ARGS_"
@@ -153,12 +165,96 @@ def _root_cause_and_owner(
     )
 
 
-def diagnose(eval_results: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _run_llm_analyst(
+    cluster_list: List[Dict[str, Any]],
+    plans: List[Dict[str, Any]],
+    total_evaluated: int,
+    run_config: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Run LLM analyst on deterministic clusters. Enriches clusters with title, root cause,
+    owner, recommended_actions, evidence_examples. Read-only: does not mutate dataset_spec.
+    On validation failure after retries, returns (cluster_list, plans) unmodified.
+    """
+    if total_evaluated <= 0 or not cluster_list:
+        return cluster_list, plans
+    payload = {
+        "total_evaluated": total_evaluated,
+        "clusters": [
+            {
+                "cluster_id": c["cluster_id"],
+                "error_type": c.get("error_type", ""),
+                "count": c["count"],
+                "hypothesis": c.get("hypothesis", ""),
+                "owner": c.get("owner", ""),
+                "task_type": c.get("task_type", ""),
+                "evidence_code": c.get("evidence_code", ""),
+                "eval_method": c.get("eval_method", ""),
+            }
+            for c in cluster_list
+        ],
+    }
+    template = (_PROMPT_DIR / "a3_analyst.md").read_text(encoding="utf-8")
+    prompt = template + "\n\n## Input\n\n```json\n" + json.dumps(payload, indent=2) + "\n```\n\nOutput only the JSON object with key `clusters`."
+    max_retries = int(run_config.get("max_llm_retries_per_stage", MAX_LLM_RETRIES_PER_STAGE))
+    try:
+        report = generate_and_validate_pydantic(prompt, A3AnalystReport, max_retries=max_retries)
+    except Exception as e:
+        logger.warning("A3 LLM analyst failed after retries, returning deterministic clusters unmodified: %s", e)
+        return cluster_list, plans
+    _ALLOWED_OWNERS = frozenset({"data", "model", "tooling", "product", "eval"})
+
+    def _normalize_owner(llm_owner: str, fallback: str) -> str:
+        o = (llm_owner or "").strip().lower()
+        if o in _ALLOWED_OWNERS:
+            return o
+        if "model" in o or "training" in o:
+            return "model"
+        if "data" in o:
+            return "data"
+        if "product" in o or "ux" in o:
+            return "product"
+        if "tool" in o:
+            return "tooling"
+        return fallback
+
+    by_id = {s.cluster_id: s for s in report.clusters}
+    enriched_clusters: List[Dict[str, Any]] = []
+    for c in cluster_list:
+        cluster_id = c["cluster_id"]
+        out = dict(c)
+        summary = by_id.get(cluster_id)
+        if summary is not None:
+            out["title"] = summary.title
+            out["hypothesis"] = summary.likely_root_cause
+            out["owner"] = _normalize_owner(summary.owner, c.get("owner", "eval"))
+            out["recommended_actions"] = summary.recommended_actions
+            out["evidence_examples"] = summary.evidence_examples
+        enriched_clusters.append(out)
+    enriched_plans: List[Dict[str, Any]] = []
+    for p in plans:
+        cluster_id = p["cluster_id"]
+        out = dict(p)
+        summary = by_id.get(cluster_id)
+        if summary is not None:
+            out["summary"] = summary.title
+            out["root_cause_hypothesis"] = summary.likely_root_cause
+            out["recommended_owner"] = _normalize_owner(summary.owner, p.get("recommended_owner", "eval"))
+            out["next_action"] = summary.recommended_actions[0] if summary.recommended_actions else (out.get("next_action") or "Review cluster and update action plan.")
+            out["evidence_examples"] = summary.evidence_examples
+        enriched_plans.append(out)
+    return enriched_clusters, enriched_plans
+
+
+def diagnose(
+    eval_results: List[Dict[str, Any]],
+    run_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Cluster failures by (error_type, evidence_code, task_type, eval_method).
-    Returns (clusters, action_plans):
-    - clusters: analytical failure_cluster objects (cluster_id, error_type, item_ids, count, hypothesis, owner, recommended_actions).
-    - action_plans: operational follow-up (summary, priority, top_examples, next_action, etc.).
+    Returns (clusters, action_plans). When run_config.diagnoser_mode is hybrid or llm_materialized,
+    runs LLM analyst to enrich clusters with title, root cause, recommendations; on LLM failure
+    returns deterministic clusters unmodified. Does not mutate dataset_spec.
     """
     key_to_group: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = defaultdict(list)
     for r in eval_results:
@@ -251,5 +347,10 @@ def diagnose(eval_results: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], 
             "next_action": "Add harder targets, more domains, and trajectory_check tasks; run larger batch and track metrics.",
             "count": 0,
         })
+
+    diagnoser_mode = (run_config or {}).get("diagnoser_mode") or "deterministic"
+    diagnoser_mode = diagnoser_mode.strip().lower() if isinstance(diagnoser_mode, str) else "deterministic"
+    if diagnoser_mode in ("hybrid", "llm_materialized") and run_config:
+        cluster_list, plans = _run_llm_analyst(cluster_list, plans, total_evaluated, run_config)
 
     return cluster_list, plans

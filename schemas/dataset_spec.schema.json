@@ -80,6 +80,35 @@
         "max_retries_per_stage": { "type": "integer", "minimum": 0, "maximum": 10 },
         "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
       }
+    },
+
+    "run_config": {
+      "type": "object",
+      "description": "Optional run-level mode flags for item generation, judging, and diagnosis. Defaults to deterministic.",
+      "additionalProperties": false,
+      "properties": {
+        "item_generation_mode": {
+          "type": "string",
+          "enum": ["deterministic", "hybrid", "llm_materialized"],
+          "default": "deterministic"
+        },
+        "judge_mode": {
+          "type": "string",
+          "enum": ["deterministic", "hybrid", "llm_materialized"],
+          "default": "deterministic"
+        },
+        "diagnoser_mode": {
+          "type": "string",
+          "enum": ["deterministic", "hybrid", "llm_materialized"],
+          "default": "deterministic"
+        },
+        "max_llm_retries_per_stage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2
+        }
+      }
     }
   }
 }

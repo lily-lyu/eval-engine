@@ -1,6 +1,6 @@
 """
-Gemini API client for planner agents. Server-side only; never expose API key to frontend.
-Uses the official Google GenAI SDK (google-generativeai).
+Gemini API client for planner and LLM workers. Server-side only; never expose API key to frontend.
+Uses the official Google GenAI SDK (google.genai). Install with: pip install google-genai
 """
 from __future__ import annotations
 
@@ -23,20 +23,19 @@ def get_client():
             "Configure it in the backend environment."
         )
     try:
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=GEMINI_API_KEY)
-        _client = genai
+        _client = genai.Client(api_key=GEMINI_API_KEY)
         return _client
     except ImportError as e:
         raise ValueError(
-            f"{LLM_PROVIDER_NOT_CONFIGURED}: google-generativeai is not installed. "
-            "Install with: pip install google-generativeai"
+            f"{LLM_PROVIDER_NOT_CONFIGURED}: google-genai is not installed. "
+            "Install with: pip install google-genai"
         ) from e
 
 
 def _model_name(name: str) -> str:
-    """Ensure model name has 'models/' prefix if missing."""
+    """Ensure model name has 'models/' prefix if missing (SDK accepts both)."""
     if not name.startswith("models/"):
         return f"models/{name}"
     return name
@@ -56,16 +55,14 @@ def generate(
     temperature = temperature if temperature is not None else PLANNER_TEMPERATURE
     client = get_client()
     try:
-        gen_config_cls = getattr(client, "GenerationConfig", None)
-        if gen_config_cls is not None:
-            generation_config = gen_config_cls(temperature=temperature)
-        else:
-            generation_config = {"temperature": temperature}
-        gm = client.GenerativeModel(
-            model_name=model_id,
-            generation_config=generation_config,
+        from google.genai import types
+
+        config = types.GenerateContentConfig(temperature=temperature)
+        response = client.models.generate_content(
+            model=model_id,
+            contents=prompt,
+            config=config,
         )
-        response = gm.generate_content(prompt)
         if not response:
             raise ValueError(
                 f"{LLM_CALL_FAILED}: empty response from model={model_id}"

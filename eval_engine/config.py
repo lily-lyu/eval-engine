@@ -6,6 +6,11 @@ from typing import Literal
 
 PlannerMode = Literal["deterministic", "llm", "hybrid"]
 
+# Run-level worker modes: deterministic (no LLM), hybrid (LLM with deterministic fallback), llm_materialized (LLM preferred)
+WorkerMode = Literal["deterministic", "hybrid", "llm_materialized"]
+
+DEFAULT_MAX_LLM_RETRIES_PER_STAGE: int = 2
+
 
 def _env_bool(key: str, default: bool = False) -> bool:
     raw = os.getenv(key, "").strip().lower()
@@ -59,6 +64,9 @@ PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "gemini-3-flash-preview").strip(
 PLANNER_TEMPERATURE: float = _env_float("PLANNER_TEMPERATURE", 0.2, 0.0, 2.0)
 PLANNER_MAX_RETRIES: int = _env_int("PLANNER_MAX_RETRIES", 3, 1, 10)
 PLANNER_ALLOW_EXPERIMENTAL_FAMILIES: bool = _env_bool("PLANNER_ALLOW_EXPERIMENTAL_FAMILIES", False)
+
+# LLM worker retries (used when run_config does not set max_llm_retries_per_stage)
+MAX_LLM_RETRIES_PER_STAGE: int = _env_int("MAX_LLM_RETRIES_PER_STAGE", DEFAULT_MAX_LLM_RETRIES_PER_STAGE, 0, 10)
 
 
 def require_gemini_key_if_llm(mode: str | None = None) -> None:
