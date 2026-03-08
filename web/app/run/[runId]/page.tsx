@@ -269,12 +269,12 @@ export default async function RunDetailPage({
 
         {activeTab === "overview" && (
           <div className="space-y-6">
-            <SectionCard title="Pipeline health">
+            <SectionCard title="流水线状态">
               <PipelineStrip stages={stageRows} />
             </SectionCard>
 
             <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <SectionCard title="Top failure clusters">
+              <SectionCard title="主要失败簇">
                 {clusters.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-neutral-800 p-6 text-neutral-400">
                     No failure clusters for this run.
@@ -315,7 +315,7 @@ export default async function RunDetailPage({
                 )}
               </SectionCard>
 
-              <SectionCard title="Run metadata">
+              <SectionCard title="运行元数据">
                 <div className="grid gap-3">
                   <div className="rounded-xl border border-neutral-800 bg-neutral-950/70 p-4">
                     <div className="text-xs uppercase tracking-[0.16em] text-neutral-500">
@@ -367,7 +367,7 @@ export default async function RunDetailPage({
         )}
 
         {activeTab === "items" && (
-          <SectionCard title="Item results">
+          <SectionCard title="样本结果">
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-sm">
                 <thead>
@@ -405,7 +405,7 @@ export default async function RunDetailPage({
 
         {activeTab === "release" && (
           <div className="space-y-6">
-            <SectionCard title="Release decision">
+            <SectionCard title="发布结论">
               <GateBanner gate={release.gate} message={release.summary} />
               <div className="mt-5 grid gap-4 md:grid-cols-3">
                 <StatCard
@@ -416,13 +416,13 @@ export default async function RunDetailPage({
                       : `${release.passRateDelta >= 0 ? "+" : ""}${(release.passRateDelta * 100).toFixed(1)} pts`
                   }
                 />
-                <StatCard label="Recovered clusters" value={String(release.recoveredClusters.length)} />
-                <StatCard label="Introduced clusters" value={String(release.introducedClusters.length)} />
+                <StatCard label="已恢复失败簇" value={String(release.recoveredClusters.length)} />
+                <StatCard label="新增失败簇" value={String(release.introducedClusters.length)} />
               </div>
             </SectionCard>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <SectionCard title="Recovered clusters">
+              <SectionCard title="已恢复失败簇">
                 {release.recoveredClusters.length === 0 ? (
                   <div className="text-neutral-400">None.</div>
                 ) : (
@@ -436,7 +436,7 @@ export default async function RunDetailPage({
                 )}
               </SectionCard>
 
-              <SectionCard title="Introduced clusters">
+              <SectionCard title="新增失败簇">
                 {release.introducedClusters.length === 0 ? (
                   <div className="text-neutral-400">None.</div>
                 ) : (
